@@ -1,0 +1,53 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Representa cada pessoa cadastrada no sistema.
+// Um usuario pode criar varios posts e tambem curtir posts de outras pessoas.
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  posts     Post[]
+  likes     PostLike[]
+}
+
+// Representa uma publicacao criada por um usuario.
+// Cada post guarda seu autor, quantidade de visualizacoes e curtidas relacionadas.
+model Post {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+  viewCount Int      @default(0)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  likes     PostLike[]
+}
+
+// Esta tabela registra quem curtiu qual post.
+// Ela existe separadamente porque uma mesma pessoa pode curtir varios posts,
+// e um mesmo post pode receber curtidas de varias pessoas.
+model PostLike {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  postId    String
+  userId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Impede que o mesmo usuario curta o mesmo post duas vezes.
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
