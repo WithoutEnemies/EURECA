@@ -7,6 +7,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PostsModule } from './posts/posts.module';
+import { CommentsModule } from './comments/comments.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   // "imports" conecta os modulos principais da aplicacao.
@@ -18,6 +20,8 @@ import { PostsModule } from './posts/posts.module';
     AuthModule,
     UsersModule,
     PostsModule,
+    CommentsModule,
+    NotificationsModule,
   ],
   // "controllers" recebem as requisicoes HTTP.
   controllers: [AppController],

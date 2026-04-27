@@ -1,0 +1,165 @@
+import { NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  NOTIFICATION_TYPES,
+  NotificationsService,
+} from './notifications.service';
+
+type PrismaNotificationMock = {
+  findMany: jest.Mock;
+  findFirst: jest.Mock;
+  update: jest.Mock;
+  updateMany: jest.Mock;
+  create: jest.Mock;
+};
+
+describe('NotificationsService', () => {
+  let service: NotificationsService;
+  let post: { findUnique: jest.Mock };
+  let comment: { findUnique: jest.Mock };
+  let notification: PrismaNotificationMock;
+
+  beforeEach(() => {
+    post = { findUnique: jest.fn() };
+    comment = { findUnique: jest.fn() };
+    notification = {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      create: jest.fn().mockResolvedValue({ id: 'notification-1' }),
+    };
+
+    service = new NotificationsService({
+      post,
+      comment,
+      notification,
+      $transaction: jest.fn((operations: Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
+    } as unknown as PrismaService);
+  });
+
+  it('creates one notification for a comment on another user post', async () => {
+    post.findUnique.mockResolvedValue({ authorId: 'post-author' });
+
+    await service.notifyCommentCreated({
+      postId: 'post-1',
+      commentId: 'comment-1',
+      actorId: 'comment-author',
+    });
+
+    expect(notification.create).toHaveBeenCalledWith({
+      data: {
+        type: NOTIFICATION_TYPES.postComment,
+        recipientId: 'post-author',
+        actorId: 'comment-author',
+        postId: 'post-1',
+        commentId: 'comment-1',
+      },
+    });
+  });
+
+  it('does not notify the actor about their own post comment', async () => {
+    post.findUnique.mockResolvedValue({ authorId: 'actor-user' });
+
+    await service.notifyCommentCreated({
+      postId: 'post-1',
+      commentId: 'comment-1',
+      actorId: 'actor-user',
+    });
+
+    expect(notification.create).not.toHaveBeenCalled();
+  });
+
+  it('prioritizes reply notifications and avoids duplicate recipients', async () => {
+    post.findUnique.mockResolvedValue({ authorId: 'post-author' });
+    comment.findUnique.mockResolvedValue({ authorId: 'post-author' });
+
+    await service.notifyCommentCreated({
+      postId: 'post-1',
+      commentId: 'comment-2',
+      actorId: 'reply-author',
+      parentCommentId: 'comment-1',
+    });
+
+    expect(notification.create).toHaveBeenCalledTimes(1);
+    expect(notification.create).toHaveBeenCalledWith({
+      data: {
+        type: NOTIFICATION_TYPES.commentReply,
+        recipientId: 'post-author',
+        actorId: 'reply-author',
+        postId: 'post-1',
+        commentId: 'comment-2',
+      },
+    });
+  });
+
+  it('marks only notifications that belong to the requester as read', async () => {
+    const createdAt = new Date('2026-04-27T12:00:00.000Z');
+    const readAt = new Date('2026-04-27T12:02:00.000Z');
+
+    notification.findFirst.mockResolvedValue({ id: 'notification-1' });
+    notification.update.mockResolvedValue({
+      id: 'notification-1',
+      type: NOTIFICATION_TYPES.postComment,
+      readAt,
+      createdAt,
+      postId: 'post-1',
+      commentId: 'comment-1',
+      actor: {
+        id: 'actor-user',
+        email: 'actor@eureca.local',
+        name: null,
+        username: 'actor',
+      },
+      post: {
+        id: 'post-1',
+        content: 'Post',
+      },
+      comment: {
+        id: 'comment-1',
+        content: 'Comentario',
+        parentCommentId: null,
+      },
+    });
+
+    await expect(
+      service.markRead('notification-1', 'recipient-user'),
+    ).resolves.toEqual({
+      id: 'notification-1',
+      type: NOTIFICATION_TYPES.postComment,
+      readAt,
+      createdAt,
+      postId: 'post-1',
+      commentId: 'comment-1',
+      actor: {
+        id: 'actor-user',
+        email: 'actor@eureca.local',
+        name: null,
+        username: 'actor',
+      },
+      post: {
+        id: 'post-1',
+        content: 'Post',
+      },
+      comment: {
+        id: 'comment-1',
+        content: 'Comentario',
+        parentCommentId: null,
+      },
+    });
+    expect(notification.findFirst).toHaveBeenCalledWith({
+      where: { id: 'notification-1', recipientId: 'recipient-user' },
+      select: { id: true },
+    });
+  });
+
+  it('rejects markRead for notifications from another user', async () => {
+    notification.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.markRead('notification-1', 'other-user'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});

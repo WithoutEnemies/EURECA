@@ -13,8 +13,8 @@ export class PostsService {
       content: true,
       createdAt: true,
       viewCount: true,
-      author: { select: { id: true, email: true } },
-      _count: { select: { likes: true } },
+      author: { select: { id: true, email: true, name: true, username: true } },
+      _count: { select: { likes: true, comments: true } },
       ...(viewerId
         ? {
             likes: {
@@ -33,8 +33,13 @@ export class PostsService {
     content: string;
     createdAt: Date;
     viewCount: number;
-    author: { id: string; email: string };
-    _count: { likes: number };
+    author: {
+      id: string;
+      email: string;
+      name?: string | null;
+      username?: string | null;
+    };
+    _count: { likes: number; comments: number };
     likes?: Array<{ id: string }>;
   }) {
     return {
@@ -43,6 +48,7 @@ export class PostsService {
       createdAt: post.createdAt,
       viewCount: post.viewCount,
       likesCount: post._count.likes,
+      commentsCount: post._count.comments,
       viewerLiked: Array.isArray(post.likes) ? post.likes.length > 0 : false,
       author: post.author,
     };

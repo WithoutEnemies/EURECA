@@ -8,6 +8,9 @@ function Sidebar({
   suggestions,
   onNewPost,
 }) {
+  const accountLabel = me?.name || me?.email
+  const accountHandle = me?.username ? `@${me.username}` : me?.email
+
   return (
     <aside className="sidebar">
       {/* Resumo do ultimo post do usuario logado. */}
@@ -38,9 +41,9 @@ function Sidebar({
         <div className="status-footer">
           <span>
             {latestMyPost
-              ? `Publicado ${latestMyPost.time}${me?.email ? ` · ${me.email}` : ''}`
-              : me?.email
-                ? `Conectado como ${me.email}`
+              ? `Publicado ${latestMyPost.time}${accountLabel ? ` · ${accountLabel}` : ''}`
+              : accountLabel
+                ? `Conectado como ${accountHandle || accountLabel}`
                 : 'Sem posts ainda'}
           </span>
           <button type="button" onClick={onNewPost}>

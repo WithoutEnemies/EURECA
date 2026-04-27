@@ -15,24 +15,34 @@ datasource db {
 // Representa cada pessoa cadastrada no sistema.
 // Um usuario pode criar varios posts e tambem curtir posts de outras pessoas.
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
-  posts     Post[]
-  likes     PostLike[]
+  id                    String         @id @default(cuid())
+  email                 String         @unique
+  password              String
+  name                  String?
+  username              String?        @unique
+  role                  String?
+  bio                   String?
+  interests             String[]       @default([])
+  createdAt             DateTime       @default(now())
+  posts                 Post[]
+  likes                 PostLike[]
+  comments              Comment[]
+  notificationsReceived Notification[] @relation("NotificationRecipient")
+  notificationsSent     Notification[] @relation("NotificationActor")
 }
 
 // Representa uma publicacao criada por um usuario.
 // Cada post guarda seu autor, quantidade de visualizacoes e curtidas relacionadas.
 model Post {
-  id        String   @id @default(cuid())
-  content   String
-  createdAt DateTime @default(now())
-  viewCount Int      @default(0)
-  authorId  String
-  author    User     @relation(fields: [authorId], references: [id])
-  likes     PostLike[]
+  id            String         @id @default(cuid())
+  content       String
+  createdAt     DateTime       @default(now())
+  viewCount     Int            @default(0)
+  authorId      String
+  author        User           @relation(fields: [authorId], references: [id])
+  likes         PostLike[]
+  comments      Comment[]
+  notifications Notification[]
 }
 
 // Esta tabela registra quem curtiu qual post.
@@ -50,4 +60,48 @@ model PostLike {
   @@unique([postId, userId])
   @@index([postId])
   @@index([userId])
+}
+
+// Representa uma resposta direta de um usuario a um post.
+// Comentarios podem responder diretamente ao post ou a outro comentario.
+model Comment {
+  id              String         @id @default(cuid())
+  content         String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  postId          String
+  authorId        String
+  parentCommentId String?
+  post            Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author          User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentComment   Comment?       @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies         Comment[]      @relation("CommentReplies")
+  notifications   Notification[]
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([parentCommentId])
+  @@index([postId, createdAt])
+}
+
+// Guarda alertas gerados por interacoes sociais entre usuarios.
+// Cada registro pertence a um destinatario e aponta para a acao que disparou o alerta.
+model Notification {
+  id          String    @id @default(cuid())
+  type        String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+  recipientId String
+  actorId     String
+  postId      String
+  commentId   String
+  recipient   User      @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor       User      @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment     Comment   @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, readAt, createdAt])
+  @@index([actorId])
+  @@index([postId])
+  @@index([commentId])
 }

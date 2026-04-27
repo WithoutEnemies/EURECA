@@ -11,7 +11,7 @@ async function bootstrap() {
   // Libera chamadas do frontend local para este backend.
   // Sem isso, o navegador bloquearia requisicoes vindas de outra porta.
   app.enableCors({
-    origin: 'http://localhost:5173',
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
   });
 
   // Valida automaticamente os dados recebidos nas rotas.

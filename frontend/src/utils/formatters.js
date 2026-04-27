@@ -53,7 +53,9 @@ export function formatCount(value) {
 
 // Encurta um texto longo sem cortar o layout do card ou da sidebar.
 export function truncateText(text, max = 110) {
-  const normalized = String(text ?? '').replace(/\s+/g, ' ').trim()
+  const normalized = String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (normalized.length <= max) return normalized
   return `${normalized.slice(0, max).trimEnd()}...`
 }
@@ -62,6 +64,9 @@ export function truncateText(text, max = 110) {
 // Aqui o frontend prepara nome, handle, contadores e estado de curtida.
 export function mapApiPost(post) {
   const authorEmail = post?.author?.email ?? 'anonimo@eureca'
+  const authorId = post?.author?.id ?? ''
+  const authorName = post?.author?.name?.trim()
+  const authorUsername = post?.author?.username?.trim()
   const local = authorEmail.split('@')[0] || 'anonimo'
   const label = local
     .split(/[._\-\s]+/)
@@ -71,9 +76,11 @@ export function mapApiPost(post) {
 
   return {
     id: post.id,
-    initials: emailToInitials(authorEmail),
-    name: label || 'Anônimo',
-    handle: `@${local.toLowerCase()}`,
+    authorId,
+    authorEmail,
+    initials: emailToInitials(authorName || authorEmail),
+    name: authorName || label || 'Anônimo',
+    handle: `@${(authorUsername || local).toLowerCase()}`,
     time: formatTimeAgo(post.createdAt),
     text: post.content,
     stats: {
@@ -90,5 +97,66 @@ export function mapApiPost(post) {
     },
     liked: Boolean(post?.viewerLiked),
     createdAt: post.createdAt,
+  }
+}
+
+// Converte um comentario da API para o formato usado pelo painel do feed.
+export function mapApiComment(comment) {
+  const authorEmail = comment?.author?.email ?? 'anonimo@eureca'
+  const authorId = comment?.author?.id ?? ''
+  const authorName = comment?.author?.name?.trim()
+  const authorUsername = comment?.author?.username?.trim()
+  const local = authorEmail.split('@')[0] || 'anonimo'
+  const label = local
+    .split(/[._\-\s]+/)
+    .filter(Boolean)
+    .map((piece) => piece[0].toUpperCase() + piece.slice(1))
+    .join(' ')
+
+  return {
+    id: comment.id,
+    postId: comment.postId,
+    parentCommentId: comment.parentCommentId ?? null,
+    authorId,
+    authorEmail,
+    initials: emailToInitials(authorName || authorEmail),
+    name: authorName || label || 'Anônimo',
+    handle: `@${(authorUsername || local).toLowerCase()}`,
+    time: formatTimeAgo(comment.createdAt),
+    text: comment.content,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+  }
+}
+
+// Converte uma notificacao da API para o card de alertas.
+export function mapApiNotification(notification) {
+  const actorEmail = notification?.actor?.email ?? 'anonimo@eureca'
+  const actorId = notification?.actor?.id ?? ''
+  const actorName = notification?.actor?.name?.trim()
+  const actorUsername = notification?.actor?.username?.trim()
+  const local = actorEmail.split('@')[0] || 'anonimo'
+  const label = local
+    .split(/[._\-\s]+/)
+    .filter(Boolean)
+    .map((piece) => piece[0].toUpperCase() + piece.slice(1))
+    .join(' ')
+
+  return {
+    id: notification.id,
+    type: notification.type,
+    readAt: notification.readAt ?? null,
+    createdAt: notification.createdAt,
+    time: formatTimeAgo(notification.createdAt),
+    postId: notification.postId,
+    commentId: notification.commentId,
+    actorId,
+    actorEmail,
+    actorInitials: emailToInitials(actorName || actorEmail),
+    actorName: actorName || label || 'Anônimo',
+    actorHandle: `@${(actorUsername || local).toLowerCase()}`,
+    postText: notification?.post?.content ?? '',
+    commentText: notification?.comment?.content ?? '',
+    parentCommentId: notification?.comment?.parentCommentId ?? null,
   }
 }
