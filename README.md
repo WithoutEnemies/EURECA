@@ -1,44 +1,51 @@
+Segue um `README.md` atualizado para colar na raiz do projeto:
+
+```markdown
 # EURECA
 
-Aplicacao web full-stack para uma comunidade simples, com autenticacao, feed de posts, curtidas e contagem de visualizacoes.
+EURECA é uma aplicação web full-stack de comunidade social, com autenticação, feed de publicações, curtidas, comentários, respostas, notificações e painel social.
 
-O repositorio esta dividido em duas apps:
+O projeto está dividido em duas aplicações:
 
 - `frontend`: interface em React + Vite
 - `backend`: API em NestJS + Prisma + PostgreSQL
 
-## Visao Geral
-
-O objetivo do projeto e oferecer uma base pequena, direta e funcional para uma experiencia de comunidade:
-
-- visitantes conseguem ver o feed publico
-- utilizadores autenticados conseguem entrar, criar posts e curtir publicacoes
-- o frontend persiste a sessao no navegador
-- a API devolve um feed personalizado para o utilizador logado, incluindo o estado de curtida
-- cada post regista visualizacoes
-
-Hoje o produto cobre o fluxo principal de autenticacao e publicacao. Algumas zonas da interface, como tendencias, sugestoes e conversas, ainda usam dados mockados no frontend.
-
 ## Funcionalidades
 
-- registo e login com JWT
-- registo com perfil inicial: nome, usuario, area, bio e interesses
-- endpoint protegido para obter o utilizador autenticado
-- feed publico sem login
-- feed autenticado com `viewerLiked`
-- criacao de posts com limite de 280 caracteres
-- like e unlike por post
-- contagem de visualizacoes
-- persistencia do token em `localStorage`
-- atalho `Entrar com Dev` para acelerar testes locais
+- Cadastro e login com JWT
+- Login por email ou nome de usuário
+- Perfil inicial com nome, usuário, área, bio e interesses
+- Feed público acessível sem login
+- Feed autenticado com estado de curtida por usuário
+- Criação de posts
+- Curtir e descurtir posts
+- Contagem de visualizações
+- Comentários em posts
+- Respostas a comentários
+- Edição e remoção de comentários próprios
+- Notificações para interações sociais
+- Marcar notificação como lida
+- Marcar todas as notificações como lidas
+- Painel lateral com discussões ativas, tópicos e progresso da comunidade
+- Conta de desenvolvimento para testes locais
 
 ## Stack
 
-- Frontend: React 19 + Vite
-- Backend: NestJS 11
-- Base de dados: PostgreSQL
-- ORM: Prisma 7
-- Autenticacao: JWT + Passport + bcrypt
+### Frontend
+
+- React 19
+- Vite 7
+- lucide-react
+- CSS próprio
+
+### Backend
+
+- NestJS 11
+- Prisma 7
+- PostgreSQL
+- JWT
+- Passport
+- bcrypt
 
 ## Estrutura
 
@@ -47,6 +54,7 @@ EURECA/
 |-- backend/
 |   |-- prisma/
 |   |-- src/
+|   |-- test/
 |   `-- package.json
 |-- frontend/
 |   |-- src/
@@ -58,13 +66,13 @@ EURECA/
 
 - Node.js
 - npm
-- PostgreSQL a correr localmente
+- PostgreSQL local
 
-Nao existe workspace root com scripts unificados. O setup e feito separadamente em `backend` e `frontend`.
+O projeto não usa workspace na raiz. Frontend e backend são instalados e executados separadamente.
 
-## Quick Start
+## Instalação
 
-### 1. Instalar dependencias
+### 1. Instalar dependências
 
 ```bash
 cd backend
@@ -74,45 +82,50 @@ cd ../frontend
 npm install
 ```
 
-### 2. Configurar o backend
+### 2. Configurar variáveis de ambiente
 
-Cria `backend/.env` com estas variaveis:
+Crie o arquivo `backend/.env`:
 
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/eureca"
-JWT_SECRET="troca-este-segredo"
+JWT_SECRET="troque-este-segredo"
 PORT=3000
 ```
 
-Notas:
+Opcionalmente, no frontend:
 
-- `DATABASE_URL` e obrigatoria
-- `JWT_SECRET` deve ser definido, embora o backend tenha fallback para desenvolvimento
-- `PORT` e opcional; por omissao usa `3000`
+```env
+VITE_API_URL="http://localhost:3000"
+```
 
-### 3. Preparar a base de dados
+Se `VITE_API_URL` não for definido, o frontend usa `http://localhost:3000`.
 
-Na pasta `backend`:
+### 3. Preparar o banco de dados
+
+Dentro de `backend`:
 
 ```bash
 npx prisma migrate dev
 ```
 
-Se quiseres apenas aplicar migrations existentes:
+Para aplicar migrations existentes em outro ambiente:
 
 ```bash
 npx prisma migrate deploy
 ```
 
-### 4. Arrancar a API
-
-Num terminal, dentro de `backend`:
+### 4. Rodar o backend
 
 ```bash
+cd backend
 npm run start:dev
 ```
 
-API por omissao: `http://localhost:3000`
+API padrão:
+
+```text
+http://localhost:3000
+```
 
 Healthcheck:
 
@@ -120,92 +133,72 @@ Healthcheck:
 curl http://localhost:3000/health
 ```
 
-### 5. Arrancar o frontend
-
-Noutro terminal, dentro de `frontend`:
+### 5. Rodar o frontend
 
 ```bash
+cd frontend
 npm run dev
 ```
 
-Frontend por omissao: `http://localhost:5173`
+Frontend padrão:
 
-## Variaveis de Ambiente
+```text
+http://localhost:5173
+```
 
-### Backend
+## Conta de desenvolvimento
 
-| Variavel | Obrigatoria | Descricao |
-| --- | --- | --- |
-| `DATABASE_URL` | sim | Ligacao PostgreSQL usada pelo Prisma |
-| `JWT_SECRET` | recomendada | Segredo usado para assinar os tokens |
-| `PORT` | nao | Porta HTTP da API |
-
-### Frontend
-
-| Variavel | Obrigatoria | Descricao |
-| --- | --- | --- |
-| `VITE_API_URL` | nao | URL base da API; fallback para `http://localhost:3000` |
-
-## Scripts Uteis
-
-### Backend
-
-| Script | O que faz |
-| --- | --- |
-| `npm run start:dev` | arranca a API em watch mode |
-| `npm run build` | compila o backend |
-| `npm run test` | corre testes unitarios |
-| `npm run test:e2e` | corre testes end-to-end |
-| `npm run lint` | executa ESLint com `--fix` |
-
-### Frontend
-
-| Script | O que faz |
-| --- | --- |
-| `npm run dev` | arranca o Vite em desenvolvimento |
-| `npm run build` | gera build de producao |
-| `npm run preview` | serve a build localmente |
-| `npm run lint` | executa ESLint |
-
-## Fluxo Rapido Para Testar
-
-1. Inicia PostgreSQL.
-2. Arranca o backend.
-3. Arranca o frontend.
-4. Abre `http://localhost:5173`.
-5. Usa login manual ou o botao `Entrar com Dev`.
-
-Conta de desenvolvimento usada pelo frontend:
+O frontend possui um atalho para login local com a conta:
 
 ```text
 email: dev@eureca.local
 password: dev123456
+username: dev_eureca
 ```
 
-Se a conta ainda nao existir, o frontend tenta cria-la automaticamente.
+Se a conta ainda não existir, o frontend tenta criá-la automaticamente.
 
-## API Principal
+## Scripts
 
-### Saude
+### Backend
 
-- `GET /health`
+| Script | Descrição |
+| --- | --- |
+| `npm run start:dev` | inicia a API em modo desenvolvimento |
+| `npm run start` | inicia a API |
+| `npm run build` | compila o backend |
+| `npm run start:prod` | roda a versão compilada |
+| `npm run test` | executa testes unitários |
+| `npm run test:e2e` | executa testes end-to-end |
+| `npm run test:cov` | gera cobertura de testes |
+| `npm run lint` | executa ESLint com correção automática |
+| `npm run format` | formata arquivos TypeScript |
 
-Resposta esperada:
+### Frontend
 
-```json
-{
-  "status": "ok",
-  "time": "<ISO timestamp>",
-  "version": "0.0.1"
-}
+| Script | Descrição |
+| --- | --- |
+| `npm run dev` | inicia o Vite |
+| `npm run build` | gera build de produção |
+| `npm run preview` | serve a build localmente |
+| `npm run lint` | executa ESLint |
+
+## API principal
+
+### Saúde
+
+```http
+GET /health
 ```
 
-### Autenticacao
+### Autenticação
 
-- `POST /auth/register`
-- `POST /auth/login`
+```http
+POST /auth/register
+POST /auth/login
+```
 
-Payload:
+Exemplo de cadastro:
 
 ```json
 {
@@ -213,25 +206,22 @@ Payload:
   "password": "dev123456",
   "name": "Dev Eureca",
   "username": "dev_eureca",
-  "role": "Desenvolvimento",
-  "bio": "Criando uma comunidade.",
-  "interests": ["Frontend", "Backend"]
+  "role": "Engenharia de Software",
+  "bio": "Conta local para testar publicações, curtidas e conversas da Eureca.",
+  "interests": ["Frontend", "Backend", "Comunidade"]
 }
 ```
 
-No login, apenas `email` e `password` sao necessarios. O campo `email` tambem aceita o nome de usuario, com ou sem `@`:
+No login, o campo `email` também aceita o nome de usuário, com ou sem `@`.
 
-```json
-{
-  "email": "dev_eureca",
-  "password": "dev123456"
-}
+### Usuários
+
+```http
+GET /users/me
+GET /users/:id
 ```
 
-### Utilizador autenticado
-
-- `GET /users/me`
-- `GET /users/:id`
+`GET /users/me` exige token JWT.
 
 Header:
 
@@ -239,55 +229,104 @@ Header:
 Authorization: Bearer <token>
 ```
 
-`GET /users/:id` devolve o perfil publico seguro de um utilizador e nao exige token.
-
 ### Posts
 
-- `GET /posts`
-- `GET /posts/me/feed`
-- `POST /posts`
-- `POST /posts/:id/like`
-- `DELETE /posts/:id/like`
-- `POST /posts/:id/view`
+```http
+GET /posts
+GET /posts/me/feed
+POST /posts
+POST /posts/:id/like
+DELETE /posts/:id/like
+POST /posts/:id/view
+```
 
-O feed autenticado devolve, alem dos dados do post:
+O feed autenticado retorna informações como:
 
-- `likesCount`
-- `viewCount`
-- `viewerLiked`
-- `author.id`
-- `author.email`
-- `author.name`
-- `author.username`
+- autor
+- quantidade de curtidas
+- quantidade de comentários
+- quantidade de visualizações
+- estado `viewerLiked`
 
-## Modelo de Dados
+### Comentários
 
-O schema Prisma tem tres entidades principais:
+```http
+GET /posts/:postId/comments
+POST /posts/:postId/comments
+PATCH /comments/:id
+DELETE /comments/:id
+```
 
-- `User`: conta autenticada
-- `Post`: publicacao criada por um utilizador
-- `PostLike`: relacao de curtida entre utilizador e post
+A listagem de comentários aceita paginação:
 
-Restricoes relevantes:
+```text
+limit
+cursor
+parentCommentId
+```
 
-- `User.email` e unico
-- `User.username` e unico quando preenchido
-- um post pertence a um autor
-- um utilizador nao pode curtir o mesmo post duas vezes
+Comentários podem responder diretamente a um post ou a outro comentário.
 
-## Comportamento Atual
+### Notificações
 
-- o backend aceita CORS do frontend local em `http://localhost:5173` e `http://127.0.0.1:5173`
-- o feed publico funciona sem autenticacao
-- criar posts e curtir exige token JWT
-- a API devolve no maximo 20 posts por feed
-- a contagem de visualizacoes e publica
-- tendencias, sugestoes e conversas ainda nao estao ligadas ao backend
+```http
+GET /notifications
+PATCH /notifications/:id/read
+PATCH /notifications/read-all
+```
 
-## Proximos Passos Naturais
+As notificações são protegidas por autenticação.
 
-- ligar as areas ainda mockadas a dados reais
-- adicionar paginacao ou cursor no feed
-- tornar CORS configuravel por ambiente
-- criar scripts de arranque unificados na raiz
-- melhorar cobertura de testes do fluxo completo frontend + backend
+## Modelo de dados
+
+Principais entidades do Prisma:
+
+- `User`: conta cadastrada
+- `Post`: publicação criada por um usuário
+- `PostLike`: curtida de usuário em post
+- `Comment`: comentário ou resposta
+- `Notification`: alerta gerado por interação social
+
+Restrições importantes:
+
+- `User.email` é único
+- `User.username` é único quando preenchido
+- Um usuário não pode curtir o mesmo post duas vezes
+- Comentários, curtidas e notificações são removidos em cascata quando o conteúdo relacionado é apagado
+- Comentários possuem índices para paginação por post, comentário pai e data de criação
+
+## Comportamento atual
+
+- O backend aceita CORS do frontend local em `http://localhost:5173` e `http://127.0.0.1:5173`
+- O feed público funciona sem autenticação
+- Criar posts, curtir, comentar e acessar notificações exige JWT
+- O frontend persiste sessão no navegador
+- Visualizações podem ser registradas sem login
+- Algumas áreas de descoberta, tópicos e sugestões ainda usam dados locais/mockados no frontend
+
+## Testes
+
+Backend:
+
+```bash
+cd backend
+npm run test
+npm run test:e2e
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+## Próximos passos
+
+- Tornar CORS configurável por ambiente
+- Adicionar paginação/cursor também no feed de posts
+- Conectar tópicos e sugestões a dados reais
+- Criar scripts unificados na raiz do projeto
+- Adicionar deploy automatizado para frontend e backend
+```
