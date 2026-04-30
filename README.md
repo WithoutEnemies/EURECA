@@ -1,5 +1,3 @@
-Segue um `README.md` atualizado para colar na raiz do projeto:
-
 ```markdown
 # EURECA
 
