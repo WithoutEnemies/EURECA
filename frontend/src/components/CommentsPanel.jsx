@@ -1,17 +1,17 @@
-import { formatCount } from '../utils/formatters'
-import { Icon } from './Icons'
+import { formatCount } from "../utils/formatters";
+import { Icon } from "./Icons";
 
 function buildCommentTree(comments) {
-  const childrenByParent = new Map()
+  const childrenByParent = new Map();
 
   comments.forEach((comment) => {
-    const parentId = comment.parentCommentId ?? ''
-    const children = childrenByParent.get(parentId) ?? []
-    children.push(comment)
-    childrenByParent.set(parentId, children)
-  })
+    const parentId = comment.parentCommentId ?? "";
+    const children = childrenByParent.get(parentId) ?? [];
+    children.push(comment);
+    childrenByParent.set(parentId, children);
+  });
 
-  return childrenByParent
+  return childrenByParent;
 }
 
 function CommentsPanel({
@@ -24,41 +24,65 @@ function CommentsPanel({
   onDraftChange,
   onSubmit,
   onRefresh,
+  onLoadMore,
+  onLoadReplies,
   onAuthorClick,
   onReply,
   onCancelReply,
   onDelete,
 }) {
-  const comments = state?.items ?? []
-  const loading = Boolean(state?.loading)
-  const submitting = Boolean(state?.submitting)
-  const error = state?.error ?? ''
-  const notice = state?.notice ?? ''
-  const count = Number(post?.counts?.replies ?? comments.length)
-  const replyToId = state?.replyToId ?? ''
-  const replyTarget = comments.find((comment) => comment.id === replyToId)
-  const childrenByParent = buildCommentTree(comments)
+  const comments = state?.items ?? [];
+  const loading = Boolean(state?.loading);
+  const loadingMore = Boolean(state?.loadingMore);
+  const submitting = Boolean(state?.submitting);
+  const error = state?.error ?? "";
+  const notice = state?.notice ?? "";
+  const count = Number(post?.counts?.replies ?? comments.length);
+  const hasMore = Boolean(state?.hasMore);
+  const replyToId = state?.replyToId ?? "";
+  const replyTarget = comments.find((comment) => comment.id === replyToId);
+  const childrenByParent = buildCommentTree(comments);
   const counterState =
     draft.length >= maxLength
-      ? 'is-max'
+      ? "is-max"
       : draft.length >= maxLength - 30
-        ? 'is-warn'
-        : ''
+        ? "is-warn"
+        : "";
 
   const renderComment = (comment, depth = 0) => {
-    const deleting = Boolean(state?.deletingIds?.includes(comment.id))
-    const children = childrenByParent.get(comment.id) ?? []
+    const deleting = Boolean(state?.deletingIds?.includes(comment.id));
+    const children = childrenByParent.get(comment.id) ?? [];
+    const directRepliesCount = Math.max(
+      Number(comment.repliesCount ?? 0),
+      children.length,
+    );
+    const replyPage = state?.replyPages?.[comment.id] ?? {};
+    const loadingReplies = Boolean(replyPage.loading);
+    const hasHiddenReplies =
+      Boolean(replyPage.hasMore) || children.length < directRepliesCount;
+    const showLoadReplies =
+      !comment.pending &&
+      !deleting &&
+      directRepliesCount > 0 &&
+      hasHiddenReplies;
+    const replyButtonLabel = loadingReplies
+      ? "Carregando respostas..."
+      : !replyPage.loaded && children.length === 0
+        ? `Ver ${formatCount(directRepliesCount)} ${
+            directRepliesCount === 1 ? "resposta" : "respostas"
+          }`
+        : "Ver mais respostas";
     const canDelete =
       Boolean(currentUserId) &&
       !comment.pending &&
-      (comment.authorId === currentUserId || post.authorId === currentUserId)
-    const canReply = Boolean(currentUserId) && !comment.pending && !deleting
+      (comment.authorId === currentUserId || post.authorId === currentUserId);
+    const canReply = Boolean(currentUserId) && !comment.pending && !deleting;
 
     return (
       <div className="comment-thread" key={comment.id}>
         <article
-          className={`comment-item ${comment.pending || deleting ? 'is-pending' : ''}`}
-          style={{ '--reply-depth': Math.min(depth, 4) }}
+          className={`comment-item ${comment.pending || deleting ? "is-pending" : ""}`}
+          style={{ "--reply-depth": Math.min(depth, 4) }}
         >
           <button
             type="button"
@@ -79,13 +103,20 @@ function CommentsPanel({
                 >
                   {comment.name}
                 </button>
+                {comment.authorBadge ? (
+                  <span
+                    className={`comment-author-badge is-${comment.authorBadge.tone}`}
+                  >
+                    {comment.authorBadge.label}
+                  </span>
+                ) : null}
                 <span>{comment.handle}</span>
                 <span>·</span>
                 <span>
                   {comment.pending
-                    ? 'Enviando...'
+                    ? "Enviando..."
                     : deleting
-                      ? 'Apagando...'
+                      ? "Apagando..."
                       : comment.time}
                 </span>
               </div>
@@ -118,9 +149,33 @@ function CommentsPanel({
             {children.map((child) => renderComment(child, depth + 1))}
           </div>
         ) : null}
+
+        {replyPage.error ? (
+          <p
+            className="comment-feedback is-error comment-reply-feedback"
+            style={{ "--reply-depth": Math.min(depth + 1, 4) }}
+          >
+            {replyPage.error}
+          </p>
+        ) : null}
+
+        {showLoadReplies ? (
+          <div
+            className="comment-replies-more"
+            style={{ "--reply-depth": Math.min(depth + 1, 4) }}
+          >
+            <button
+              type="button"
+              onClick={() => onLoadReplies?.(comment.id)}
+              disabled={loadingReplies}
+            >
+              {replyButtonLabel}
+            </button>
+          </div>
+        ) : null}
       </div>
-    )
-  }
+    );
+  };
 
   return (
     <section
@@ -136,9 +191,9 @@ function CommentsPanel({
           type="button"
           className="mini-link-btn"
           onClick={onRefresh}
-          disabled={loading || submitting}
+          disabled={loading || loadingMore || submitting}
         >
-          {loading ? 'Atualizando...' : 'Atualizar'}
+          {loading ? "Atualizando..." : "Atualizar"}
         </button>
       </div>
 
@@ -165,17 +220,29 @@ function CommentsPanel({
 
       {comments.length > 0 ? (
         <div className="comments-list">
-          {(childrenByParent.get('') ?? []).map((comment) =>
+          {(childrenByParent.get("") ?? []).map((comment) =>
             renderComment(comment),
           )}
+        </div>
+      ) : null}
+
+      {comments.length > 0 && hasMore ? (
+        <div className="comment-load-more-row">
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loading || loadingMore || submitting}
+          >
+            {loadingMore ? "Carregando..." : "Ver mais comentários"}
+          </button>
         </div>
       ) : null}
 
       <form
         className="comment-composer"
         onSubmit={(event) => {
-          event.preventDefault()
-          onSubmit?.()
+          event.preventDefault();
+          onSubmit?.();
         }}
       >
         <div className="comment-avatar is-current">{userInitial}</div>
@@ -192,15 +259,15 @@ function CommentsPanel({
             value={draft}
             onChange={(event) => onDraftChange?.(event.target.value)}
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault()
-                onSubmit?.()
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                onSubmit?.();
               }
             }}
             placeholder={
               replyTarget
                 ? `Responder a ${replyTarget.handle}...`
-                : 'Escreva um comentário...'
+                : "Escreva um comentário..."
             }
             maxLength={maxLength}
             rows={2}
@@ -216,17 +283,17 @@ function CommentsPanel({
             >
               {submitting
                 ? replyTarget
-                  ? 'Respondendo...'
-                  : 'Comentando...'
+                  ? "Respondendo..."
+                  : "Comentando..."
                 : replyTarget
-                  ? 'Responder'
-                  : 'Comentar'}
+                  ? "Responder"
+                  : "Comentar"}
             </button>
           </div>
         </div>
       </form>
     </section>
-  )
+  );
 }
 
-export default CommentsPanel
+export default CommentsPanel;

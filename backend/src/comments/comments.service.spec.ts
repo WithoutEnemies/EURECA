@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CommentsService } from './comments.service';
@@ -83,6 +87,7 @@ describe('CommentsService', () => {
         updatedAt: createdAt,
         postId: 'post-1',
         parentCommentId: null,
+        repliesCount: 0,
         author: {
           id: 'user-1',
           email: 'dev@eureca.local',
@@ -147,6 +152,7 @@ describe('CommentsService', () => {
         updatedAt: createdAt,
         postId: 'post-1',
         parentCommentId: 'comment-1',
+        repliesCount: 0,
         author: {
           id: 'user-2',
           email: 'reply@eureca.local',
@@ -192,6 +198,130 @@ describe('CommentsService', () => {
     await expect(service.findForPost('missing-post')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('findForPost returns a paginated root comment page', async () => {
+    const firstDate = new Date('2026-04-27T12:00:00.000Z');
+    const secondDate = new Date('2026-04-27T12:01:00.000Z');
+    const thirdDate = new Date('2026-04-27T12:02:00.000Z');
+
+    post.findUnique.mockResolvedValue({ id: 'post-1' });
+    comment.findMany.mockResolvedValue([
+      {
+        id: 'comment-1',
+        content: 'Primeiro',
+        createdAt: firstDate,
+        updatedAt: firstDate,
+        postId: 'post-1',
+        parentCommentId: null,
+        _count: { replies: 2 },
+        author: {
+          id: 'user-1',
+          email: 'dev@eureca.local',
+          name: null,
+          username: 'dev',
+        },
+      },
+      {
+        id: 'comment-2',
+        content: 'Segundo',
+        createdAt: secondDate,
+        updatedAt: secondDate,
+        postId: 'post-1',
+        parentCommentId: null,
+        _count: { replies: 0 },
+        author: {
+          id: 'user-2',
+          email: 'reply@eureca.local',
+          name: null,
+          username: 'reply',
+        },
+      },
+      {
+        id: 'comment-3',
+        content: 'Terceiro',
+        createdAt: thirdDate,
+        updatedAt: thirdDate,
+        postId: 'post-1',
+        parentCommentId: null,
+        _count: { replies: 0 },
+        author: {
+          id: 'user-3',
+          email: 'third@eureca.local',
+          name: null,
+          username: 'third',
+        },
+      },
+    ]);
+    comment.count.mockResolvedValue(8);
+
+    await expect(service.findForPost('post-1', { limit: 2 })).resolves.toEqual({
+      items: [
+        {
+          id: 'comment-1',
+          content: 'Primeiro',
+          createdAt: firstDate,
+          updatedAt: firstDate,
+          postId: 'post-1',
+          parentCommentId: null,
+          repliesCount: 2,
+          author: {
+            id: 'user-1',
+            email: 'dev@eureca.local',
+            name: null,
+            username: 'dev',
+          },
+        },
+        {
+          id: 'comment-2',
+          content: 'Segundo',
+          createdAt: secondDate,
+          updatedAt: secondDate,
+          postId: 'post-1',
+          parentCommentId: null,
+          repliesCount: 0,
+          author: {
+            id: 'user-2',
+            email: 'reply@eureca.local',
+            name: null,
+            username: 'reply',
+          },
+        },
+      ],
+      hasMore: true,
+      nextCursor: 'comment-2',
+      commentsCount: 8,
+    });
+    expect(comment.findMany).toHaveBeenCalledWith({
+      where: { postId: 'post-1', parentCommentId: null },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: 3,
+      select: expect.any(Object),
+    });
+  });
+
+  it('findForPost rejects cursors outside the requested comment page scope', async () => {
+    const createdAt = new Date('2026-04-27T12:00:00.000Z');
+
+    post.findUnique.mockResolvedValue({ id: 'post-1' });
+    comment.findUnique
+      .mockResolvedValueOnce({
+        id: 'comment-1',
+        postId: 'post-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'comment-2',
+        postId: 'post-1',
+        parentCommentId: null,
+        createdAt,
+      });
+
+    await expect(
+      service.findForPost('post-1', {
+        parentCommentId: 'comment-1',
+        cursor: 'comment-2',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('update rejects comments from another author', async () => {

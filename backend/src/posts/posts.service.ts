@@ -13,7 +13,15 @@ export class PostsService {
       content: true,
       createdAt: true,
       viewCount: true,
-      author: { select: { id: true, email: true, name: true, username: true } },
+      author: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          username: true,
+          role: true,
+        },
+      },
       _count: { select: { likes: true, comments: true } },
       ...(viewerId
         ? {
@@ -38,6 +46,7 @@ export class PostsService {
       email: string;
       name?: string | null;
       username?: string | null;
+      role?: string | null;
     };
     _count: { likes: number; comments: number };
     likes?: Array<{ id: string }>;

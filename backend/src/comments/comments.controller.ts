@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -25,8 +26,17 @@ export class CommentsController {
 
   // Lista os comentarios de um post. Esta rota e publica como o feed.
   @Get('posts/:postId/comments')
-  findForPost(@Param('postId') postId: string) {
-    return this.comments.findForPost(postId);
+  findForPost(
+    @Param('postId') postId: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('parentCommentId') parentCommentId?: string,
+  ) {
+    return this.comments.findForPost(postId, {
+      limit,
+      cursor,
+      parentCommentId,
+    });
   }
 
   // Cria um comentario em nome do usuario autenticado.

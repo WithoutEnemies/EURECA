@@ -14,11 +14,15 @@ type CommentRow = {
   updatedAt: Date;
   postId: string;
   parentCommentId?: string | null;
+  _count?: {
+    replies: number;
+  };
   author: {
     id: string;
     email: string;
     name?: string | null;
     username?: string | null;
+    role?: string | null;
   };
 };
 
@@ -26,6 +30,12 @@ type CommentOwnerRow = {
   id: string;
   postId: string;
   authorId: string;
+};
+
+type FindCommentsOptions = {
+  parentCommentId?: string;
+  cursor?: string;
+  limit?: string | number;
 };
 
 @Injectable()
@@ -42,8 +52,14 @@ export class CommentsService {
     updatedAt: true,
     postId: true,
     parentCommentId: true,
-    author: { select: { id: true, email: true, name: true, username: true } },
+    _count: { select: { replies: true } },
+    author: {
+      select: { id: true, email: true, name: true, username: true, role: true },
+    },
   } as const;
+
+  private readonly defaultPageSize = 10;
+  private readonly maxPageSize = 25;
 
   private mapComment(comment: CommentRow) {
     return {
@@ -53,22 +69,56 @@ export class CommentsService {
       updatedAt: comment.updatedAt,
       postId: comment.postId,
       parentCommentId: comment.parentCommentId,
+      repliesCount: comment._count?.replies ?? 0,
       author: comment.author,
     };
   }
 
-  // Lista os comentarios de um post em ordem cronologica.
-  async findForPost(postId: string) {
+  // Lista comentarios em paginas pequenas. Por padrao, busca comentarios raiz;
+  // quando parentCommentId vem preenchido, busca somente respostas daquele comentario.
+  async findForPost(postId: string, options: FindCommentsOptions = {}) {
     await this.assertPostExists(postId);
+    await this.assertValidParentComment(postId, options.parentCommentId);
+
+    const limit = this.normalizeLimit(options.limit);
+    const parentCommentId = options.parentCommentId ?? null;
+    const cursorComment = await this.findPaginationCursor(
+      postId,
+      parentCommentId,
+      options.cursor,
+    );
 
     const rows = await this.prisma.comment.findMany({
-      where: { postId },
-      orderBy: { createdAt: 'asc' },
-      take: 50,
+      where: {
+        postId,
+        parentCommentId,
+        ...(cursorComment
+          ? {
+              OR: [
+                { createdAt: { gt: cursorComment.createdAt } },
+                {
+                  createdAt: cursorComment.createdAt,
+                  id: { gt: cursorComment.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: limit + 1,
       select: this.commentSelect,
     });
+    const commentsCount = await this.countForPost(postId);
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const lastRow = pageRows.at(-1);
 
-    return rows.map((comment) => this.mapComment(comment));
+    return {
+      items: pageRows.map((comment) => this.mapComment(comment)),
+      hasMore,
+      nextCursor: hasMore && lastRow ? lastRow.id : null,
+      commentsCount,
+    };
   }
 
   // Cria um comentario no post informado em nome do usuario autenticado.
@@ -217,5 +267,48 @@ export class CommentsService {
     return this.prisma.comment.count({
       where: { postId },
     });
+  }
+
+  private normalizeLimit(limit?: string | number) {
+    const parsed = Number(limit ?? this.defaultPageSize);
+
+    if (!Number.isFinite(parsed)) {
+      return this.defaultPageSize;
+    }
+
+    return Math.min(this.maxPageSize, Math.max(1, Math.floor(parsed)));
+  }
+
+  private async findPaginationCursor(
+    postId: string,
+    parentCommentId: string | null,
+    cursor?: string,
+  ) {
+    if (!cursor) {
+      return null;
+    }
+
+    const comment = await this.prisma.comment.findUnique({
+      where: { id: cursor },
+      select: {
+        id: true,
+        postId: true,
+        parentCommentId: true,
+        createdAt: true,
+      },
+    });
+
+    if (!comment) {
+      throw new BadRequestException('Cursor de comentários inválido.');
+    }
+
+    if (
+      comment.postId !== postId ||
+      (comment.parentCommentId ?? null) !== parentCommentId
+    ) {
+      throw new BadRequestException('Cursor de comentários inválido.');
+    }
+
+    return comment;
   }
 }

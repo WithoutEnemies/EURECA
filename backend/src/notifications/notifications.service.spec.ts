@@ -95,6 +95,50 @@ describe('NotificationsService', () => {
     });
   });
 
+  it('notifies both the replied comment author and post author when they differ', async () => {
+    post.findUnique.mockResolvedValue({ authorId: 'post-author' });
+    comment.findUnique.mockResolvedValue({ authorId: 'comment-author' });
+
+    await service.notifyCommentCreated({
+      postId: 'post-1',
+      commentId: 'comment-2',
+      actorId: 'reply-author',
+      parentCommentId: 'comment-1',
+    });
+
+    expect(notification.create).toHaveBeenCalledTimes(2);
+    expect(notification.create).toHaveBeenNthCalledWith(1, {
+      data: {
+        type: NOTIFICATION_TYPES.commentReply,
+        recipientId: 'comment-author',
+        actorId: 'reply-author',
+        postId: 'post-1',
+        commentId: 'comment-2',
+      },
+    });
+    expect(notification.create).toHaveBeenNthCalledWith(2, {
+      data: {
+        type: NOTIFICATION_TYPES.postComment,
+        recipientId: 'post-author',
+        actorId: 'reply-author',
+        postId: 'post-1',
+        commentId: 'comment-2',
+      },
+    });
+  });
+
+  it('marks all unread notifications for a user as read', async () => {
+    notification.updateMany.mockResolvedValue({ count: 3 });
+
+    await expect(service.markAllRead('recipient-user')).resolves.toEqual({
+      updatedCount: 3,
+    });
+    expect(notification.updateMany).toHaveBeenCalledWith({
+      where: { recipientId: 'recipient-user', readAt: null },
+      data: { readAt: expect.any(Date) },
+    });
+  });
+
   it('marks only notifications that belong to the requester as read', async () => {
     const createdAt = new Date('2026-04-27T12:00:00.000Z');
     const readAt = new Date('2026-04-27T12:02:00.000Z');

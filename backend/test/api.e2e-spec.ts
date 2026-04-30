@@ -54,6 +54,22 @@ function isAuthResponseBody(value: unknown): value is AuthResponseBody {
   );
 }
 
+async function registerTestUser(app: INestApplication<App>, email: string) {
+  const response = await request(app.getHttpServer())
+    .post('/auth/register')
+    .send({ email, password: 'dev123456' })
+    .expect(201);
+
+  const body: unknown = response.body;
+  expect(isAuthResponseBody(body)).toBe(true);
+
+  if (!isAuthResponseBody(body)) {
+    throw new Error('Invalid register response');
+  }
+
+  return body;
+}
+
 describe('API flows (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: InMemoryPrismaService;
@@ -266,7 +282,12 @@ describe('API flows (e2e)', () => {
     await request(app.getHttpServer())
       .get('/posts/post-1/comments')
       .expect(200)
-      .expect([]);
+      .expect({
+        items: [],
+        hasMore: false,
+        nextCursor: null,
+        commentsCount: 0,
+      });
 
     const commentResponse = await request(app.getHttpServer())
       .post('/posts/post-1/comments')
@@ -282,6 +303,7 @@ describe('API flows (e2e)', () => {
         updatedAt: '2026-01-01T00:00:03.000Z',
         postId: 'post-1',
         parentCommentId: null,
+        repliesCount: 0,
         author: {
           id: 'user-1',
           email: 'writer@eureca.local',
@@ -352,6 +374,7 @@ describe('API flows (e2e)', () => {
         content: 'Resposta de outro usuário',
         postId: 'post-1',
         parentCommentId: 'comment-1',
+        repliesCount: 0,
         author: {
           id: 'user-2',
           email: 'other@eureca.local',
@@ -359,6 +382,60 @@ describe('API flows (e2e)', () => {
       },
       commentsCount: 2,
     });
+
+    await request(app.getHttpServer())
+      .get('/posts/post-1/comments')
+      .query({ limit: 1 })
+      .expect(200)
+      .expect({
+        items: [
+          {
+            id: 'comment-1',
+            content: 'Primeiro comentário',
+            createdAt: '2026-01-01T00:00:03.000Z',
+            updatedAt: '2026-01-01T00:00:03.000Z',
+            postId: 'post-1',
+            parentCommentId: null,
+            repliesCount: 1,
+            author: {
+              id: 'user-1',
+              email: 'writer@eureca.local',
+              name: null,
+              username: null,
+            },
+          },
+        ],
+        hasMore: false,
+        nextCursor: null,
+        commentsCount: 2,
+      });
+
+    await request(app.getHttpServer())
+      .get('/posts/post-1/comments')
+      .query({ parentCommentId: 'comment-1', limit: 1 })
+      .expect(200)
+      .expect({
+        items: [
+          {
+            id: 'comment-2',
+            content: 'Resposta de outro usuário',
+            createdAt: '2026-01-01T00:00:05.000Z',
+            updatedAt: '2026-01-01T00:00:05.000Z',
+            postId: 'post-1',
+            parentCommentId: 'comment-1',
+            repliesCount: 0,
+            author: {
+              id: 'user-2',
+              email: 'other@eureca.local',
+              name: null,
+              username: null,
+            },
+          },
+        ],
+        hasMore: false,
+        nextCursor: null,
+        commentsCount: 2,
+      });
 
     const notificationsResponse = await request(app.getHttpServer())
       .get('/notifications')
@@ -432,6 +509,7 @@ describe('API flows (e2e)', () => {
         updatedAt: '2026-01-01T00:00:07.000Z',
         postId: 'post-1',
         parentCommentId: null,
+        repliesCount: 0,
         author: {
           id: 'user-1',
           email: 'writer@eureca.local',
@@ -443,22 +521,28 @@ describe('API flows (e2e)', () => {
     await request(app.getHttpServer())
       .get('/posts/post-1/comments')
       .expect(200)
-      .expect([
-        {
-          id: 'comment-1',
-          content: 'Comentário editado',
-          createdAt: '2026-01-01T00:00:03.000Z',
-          updatedAt: '2026-01-01T00:00:07.000Z',
-          postId: 'post-1',
-          parentCommentId: null,
-          author: {
-            id: 'user-1',
-            email: 'writer@eureca.local',
-            name: null,
-            username: null,
+      .expect({
+        items: [
+          {
+            id: 'comment-1',
+            content: 'Comentário editado',
+            createdAt: '2026-01-01T00:00:03.000Z',
+            updatedAt: '2026-01-01T00:00:07.000Z',
+            postId: 'post-1',
+            parentCommentId: null,
+            repliesCount: 0,
+            author: {
+              id: 'user-1',
+              email: 'writer@eureca.local',
+              name: null,
+              username: null,
+            },
           },
-        },
-      ]);
+        ],
+        hasMore: false,
+        nextCursor: null,
+        commentsCount: 1,
+      });
 
     await request(app.getHttpServer())
       .delete('/comments/comment-1')
@@ -474,7 +558,12 @@ describe('API flows (e2e)', () => {
     await request(app.getHttpServer())
       .get('/posts/post-1/comments')
       .expect(200)
-      .expect([]);
+      .expect({
+        items: [],
+        hasMore: false,
+        nextCursor: null,
+        commentsCount: 0,
+      });
 
     await request(app.getHttpServer())
       .get('/posts')
@@ -496,5 +585,196 @@ describe('API flows (e2e)', () => {
           },
         },
       ]);
+  });
+
+  it('paginates comment threads and protects notification ownership', async () => {
+    const postAuthor = await registerTestUser(app, 'author@eureca.local');
+
+    const postResponse = await request(app.getHttpServer())
+      .post('/posts')
+      .set('Authorization', `Bearer ${postAuthor.access_token}`)
+      .send({ content: 'Post com conversa longa' })
+      .expect(201);
+
+    expect(postResponse.body).toMatchObject({
+      id: 'post-1',
+      content: 'Post com conversa longa',
+      commentsCount: 0,
+      author: {
+        id: postAuthor.user.id,
+        email: 'author@eureca.local',
+      },
+    });
+
+    const commenter = await registerTestUser(app, 'commenter@eureca.local');
+    const replier = await registerTestUser(app, 'replier@eureca.local');
+
+    await request(app.getHttpServer())
+      .post('/posts/post-1/comments')
+      .set('Authorization', `Bearer ${commenter.access_token}`)
+      .send({ content: 'Comentário raiz 1' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/posts/post-1/comments')
+      .set('Authorization', `Bearer ${commenter.access_token}`)
+      .send({ content: 'Comentário raiz 2' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/posts/post-1/comments')
+      .set('Authorization', `Bearer ${commenter.access_token}`)
+      .send({ content: 'Comentário raiz 3' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/posts/post-1/comments')
+      .set('Authorization', `Bearer ${replier.access_token}`)
+      .send({
+        content: 'Resposta ao primeiro comentário',
+        parentCommentId: 'comment-1',
+      })
+      .expect(201);
+
+    const firstPageResponse = await request(app.getHttpServer())
+      .get('/posts/post-1/comments')
+      .query({ limit: 2 })
+      .expect(200);
+
+    expect(firstPageResponse.body).toMatchObject({
+      hasMore: true,
+      nextCursor: 'comment-2',
+      commentsCount: 4,
+    });
+    expect(firstPageResponse.body.items).toEqual([
+      expect.objectContaining({
+        id: 'comment-1',
+        content: 'Comentário raiz 1',
+        parentCommentId: null,
+        repliesCount: 1,
+      }),
+      expect.objectContaining({
+        id: 'comment-2',
+        content: 'Comentário raiz 2',
+        parentCommentId: null,
+        repliesCount: 0,
+      }),
+    ]);
+
+    const secondPageResponse = await request(app.getHttpServer())
+      .get('/posts/post-1/comments')
+      .query({ limit: 2, cursor: 'comment-2' })
+      .expect(200);
+
+    expect(secondPageResponse.body).toMatchObject({
+      hasMore: false,
+      nextCursor: null,
+      commentsCount: 4,
+    });
+    expect(secondPageResponse.body.items).toEqual([
+      expect.objectContaining({
+        id: 'comment-3',
+        content: 'Comentário raiz 3',
+        parentCommentId: null,
+        repliesCount: 0,
+      }),
+    ]);
+
+    await request(app.getHttpServer())
+      .get('/posts/post-1/comments')
+      .query({ parentCommentId: 'comment-1', limit: 1 })
+      .expect(200)
+      .expect({
+        items: [
+          {
+            id: 'comment-4',
+            content: 'Resposta ao primeiro comentário',
+            createdAt: '2026-01-01T00:00:10.000Z',
+            updatedAt: '2026-01-01T00:00:10.000Z',
+            postId: 'post-1',
+            parentCommentId: 'comment-1',
+            repliesCount: 0,
+            author: {
+              id: replier.user.id,
+              email: 'replier@eureca.local',
+              name: null,
+              username: null,
+            },
+          },
+        ],
+        hasMore: false,
+        nextCursor: null,
+        commentsCount: 4,
+      });
+
+    await request(app.getHttpServer())
+      .get('/posts/post-1/comments')
+      .query({ parentCommentId: 'comment-1', cursor: 'comment-2' })
+      .expect(400);
+
+    const commenterNotificationsResponse = await request(app.getHttpServer())
+      .get('/notifications')
+      .set('Authorization', `Bearer ${commenter.access_token}`)
+      .expect(200);
+
+    expect(commenterNotificationsResponse.body).toHaveLength(1);
+    expect(commenterNotificationsResponse.body[0]).toMatchObject({
+      id: 'notification-4',
+      type: 'comment_reply',
+      readAt: null,
+      postId: 'post-1',
+      commentId: 'comment-4',
+      actor: {
+        id: replier.user.id,
+        email: 'replier@eureca.local',
+      },
+    });
+
+    await request(app.getHttpServer())
+      .patch('/notifications/notification-4/read')
+      .set('Authorization', `Bearer ${replier.access_token}`)
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .patch('/notifications/notification-4/read')
+      .set('Authorization', `Bearer ${commenter.access_token}`)
+      .expect(200);
+
+    const authorNotificationsResponse = await request(app.getHttpServer())
+      .get('/notifications')
+      .set('Authorization', `Bearer ${postAuthor.access_token}`)
+      .expect(200);
+
+    expect(authorNotificationsResponse.body).toHaveLength(4);
+    expect(authorNotificationsResponse.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'notification-1',
+          type: 'post_comment',
+          commentId: 'comment-1',
+        }),
+        expect.objectContaining({
+          id: 'notification-2',
+          type: 'post_comment',
+          commentId: 'comment-2',
+        }),
+        expect.objectContaining({
+          id: 'notification-3',
+          type: 'post_comment',
+          commentId: 'comment-3',
+        }),
+        expect.objectContaining({
+          id: 'notification-5',
+          type: 'post_comment',
+          commentId: 'comment-4',
+        }),
+      ]),
+    );
+
+    await request(app.getHttpServer())
+      .patch('/notifications/read-all')
+      .set('Authorization', `Bearer ${postAuthor.access_token}`)
+      .expect(200)
+      .expect({ updatedCount: 4 });
   });
 });

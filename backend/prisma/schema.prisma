@@ -82,6 +82,7 @@ model Comment {
   @@index([authorId])
   @@index([parentCommentId])
   @@index([postId, createdAt])
+  @@index([postId, parentCommentId, createdAt])
 }
 
 // Guarda alertas gerados por interacoes sociais entre usuarios.

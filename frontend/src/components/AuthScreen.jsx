@@ -22,6 +22,7 @@ function AuthScreen({
   onSubmit,
   onSwitchMode,
   onDevLogin,
+  theme = 'dark',
 }) {
   const isRegister = authMode === 'register'
   const selectedInterests = registerProfile?.interests ?? []
@@ -40,7 +41,7 @@ function AuthScreen({
   }
 
   return (
-    <div className="eureca-app">
+    <div className="eureca-app" data-theme={theme}>
       <div className="login-shell">
         <div className={`login-panel panel ${isRegister ? 'is-register' : ''}`}>
           {/* Bloco visual da marca e texto de boas-vindas. */}
@@ -72,7 +73,9 @@ function AuthScreen({
                   <input
                     type="text"
                     value={registerProfile.name}
-                    onChange={(event) => onRegisterProfileChange('name', event.target.value)}
+                    onChange={(event) =>
+                      onRegisterProfileChange('name', event.target.value)
+                    }
                     placeholder="Seu nome completo"
                     autoComplete="name"
                     maxLength={80}
@@ -84,7 +87,9 @@ function AuthScreen({
                   <input
                     type="text"
                     value={registerProfile.username}
-                    onChange={(event) => onRegisterProfileChange('username', event.target.value)}
+                    onChange={(event) =>
+                      onRegisterProfileChange('username', event.target.value)
+                    }
                     placeholder="seu_usuario"
                     autoComplete="username"
                     maxLength={24}
@@ -95,7 +100,9 @@ function AuthScreen({
                   <span>Área principal</span>
                   <select
                     value={registerProfile.role}
-                    onChange={(event) => onRegisterProfileChange('role', event.target.value)}
+                    onChange={(event) =>
+                      onRegisterProfileChange('role', event.target.value)
+                    }
                   >
                     {REGISTER_ROLE_GROUPS.map((group) => (
                       <optgroup key={group.label} label={group.label}>
@@ -113,7 +120,9 @@ function AuthScreen({
                   <span>Bio curta</span>
                   <textarea
                     value={registerProfile.bio}
-                    onChange={(event) => onRegisterProfileChange('bio', event.target.value)}
+                    onChange={(event) =>
+                      onRegisterProfileChange('bio', event.target.value)
+                    }
                     placeholder="Uma frase sobre o que você está construindo"
                     rows={3}
                     maxLength={160}
@@ -121,16 +130,24 @@ function AuthScreen({
                 </label>
 
                 <fieldset className="register-interest-field is-wide">
-                  <legend>Interesses ({selectedInterests.length}/{REGISTER_MAX_INTERESTS})</legend>
+                  <legend>
+                    Interesses ({selectedInterests.length}/
+                    {REGISTER_MAX_INTERESTS})
+                  </legend>
                   <div className="register-interest-groups">
                     {REGISTER_INTEREST_GROUPS.map((group) => (
-                      <div key={group.label} className="register-interest-group">
+                      <div
+                        key={group.label}
+                        className="register-interest-group"
+                      >
                         <span>{group.label}</span>
                         <div className="register-chip-list">
                           {group.options.map((interest) => {
-                            const isSelected = selectedInterests.includes(interest)
+                            const isSelected =
+                              selectedInterests.includes(interest)
                             const isDisabled =
-                              !isSelected && selectedInterests.length >= REGISTER_MAX_INTERESTS
+                              !isSelected &&
+                              selectedInterests.length >= REGISTER_MAX_INTERESTS
 
                             return (
                               <button
@@ -156,7 +173,10 @@ function AuthScreen({
                     type="checkbox"
                     checked={registerProfile.acceptedTerms}
                     onChange={(event) =>
-                      onRegisterProfileChange('acceptedTerms', event.target.checked)
+                      onRegisterProfileChange(
+                        'acceptedTerms',
+                        event.target.checked,
+                      )
                     }
                   />
                   <span>Aceito criar um perfil público básico na Eureca.</span>
@@ -170,7 +190,11 @@ function AuthScreen({
                 type={isRegister ? 'email' : 'text'}
                 value={email}
                 onChange={(event) => onEmailChange(event.target.value)}
-                placeholder={isRegister ? 'voce@eureca.com' : 'voce@eureca.com ou seu_usuario'}
+                placeholder={
+                  isRegister
+                    ? 'voce@eureca.com'
+                    : 'voce@eureca.com ou seu_usuario'
+                }
                 autoComplete={isRegister ? 'email' : 'username'}
               />
             </label>
@@ -193,7 +217,9 @@ function AuthScreen({
                 <input
                   type="password"
                   value={confirmPassword}
-                  onChange={(event) => onConfirmPasswordChange(event.target.value)}
+                  onChange={(event) =>
+                    onConfirmPasswordChange(event.target.value)
+                  }
                   placeholder="Repita sua senha"
                   autoComplete="new-password"
                 />
@@ -203,7 +229,11 @@ function AuthScreen({
             {authError ? <p className="login-error">{authError}</p> : null}
 
             {/* O mesmo formulario serve para login e cadastro; so mudam os textos e a rota chamada. */}
-            <button type="submit" className="login-submit" disabled={authLoading}>
+            <button
+              type="submit"
+              className="login-submit"
+              disabled={authLoading}
+            >
               {authLoading
                 ? 'Processando...'
                 : isRegister

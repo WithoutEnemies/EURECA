@@ -95,6 +95,11 @@ type CommentSelect = {
   author?: {
     select?: UserSelect;
   };
+  _count?: {
+    select?: {
+      replies?: boolean;
+    };
+  };
 };
 
 type NotificationSelect = {
@@ -349,17 +354,67 @@ export class InMemoryPrismaService {
       take,
       select,
     }: {
-      where: { postId: string };
-      orderBy?: { createdAt: 'asc' | 'desc' };
+      where: {
+        postId: string;
+        parentCommentId?: string | null;
+        OR?: Array<{
+          createdAt?: Date | { gt?: Date };
+          id?: { gt?: string };
+        }>;
+      };
+      orderBy?:
+        | { createdAt?: 'asc' | 'desc'; id?: 'asc' | 'desc' }
+        | Array<{ createdAt?: 'asc' | 'desc'; id?: 'asc' | 'desc' }>;
       take?: number;
       select?: CommentSelect;
     }) => {
-      const direction = orderBy?.createdAt ?? 'asc';
+      const orderItems = Array.isArray(orderBy)
+        ? orderBy
+        : [orderBy ?? { createdAt: 'asc' as const }];
       const sorted = this.comments
-        .filter((comment) => comment.postId === where.postId)
+        .filter((comment) => {
+          const samePost = comment.postId === where.postId;
+          const sameParent =
+            where.parentCommentId === undefined ||
+            comment.parentCommentId === where.parentCommentId;
+          const afterCursor =
+            !where.OR ||
+            where.OR.some((condition) => {
+              const createdAtCondition = condition.createdAt;
+              const createdAtMatches =
+                createdAtCondition instanceof Date
+                  ? comment.createdAt.getTime() === createdAtCondition.getTime()
+                  : createdAtCondition?.gt
+                    ? comment.createdAt.getTime() >
+                      createdAtCondition.gt.getTime()
+                    : true;
+              const idMatches = condition.id?.gt
+                ? comment.id > condition.id.gt
+                : true;
+
+              return createdAtMatches && idMatches;
+            });
+
+          return samePost && sameParent && afterCursor;
+        })
         .sort((left, right) => {
-          const diff = left.createdAt.getTime() - right.createdAt.getTime();
-          return direction === 'asc' ? diff : -diff;
+          for (const item of orderItems) {
+            if (item.createdAt) {
+              const diff = left.createdAt.getTime() - right.createdAt.getTime();
+              if (diff !== 0) {
+                return item.createdAt === 'asc' ? diff : -diff;
+              }
+            }
+
+            if (item.id) {
+              const diff = left.id.localeCompare(right.id);
+              if (diff !== 0) {
+                return item.id === 'asc' ? diff : -diff;
+              }
+            }
+          }
+
+          return 0;
         });
 
       return Promise.resolve(
@@ -469,10 +524,20 @@ export class InMemoryPrismaService {
       return Promise.resolve(this.selectComment(record));
     },
 
-    count: ({ where }: { where: { postId: string } }) => {
+    count: ({
+      where,
+    }: {
+      where: { postId: string; parentCommentId?: string | null };
+    }) => {
       return Promise.resolve(
-        this.comments.filter((comment) => comment.postId === where.postId)
-          .length,
+        this.comments.filter((comment) => {
+          const samePost = comment.postId === where.postId;
+          const sameParent =
+            where.parentCommentId === undefined ||
+            comment.parentCommentId === where.parentCommentId;
+
+          return samePost && sameParent;
+        }).length,
       );
     },
   };
@@ -680,6 +745,9 @@ export class InMemoryPrismaService {
     }
 
     const author = this.users.find((user) => user.id === record.authorId);
+    const replies = this.comments.filter(
+      (comment) => comment.parentCommentId === record.id,
+    );
 
     return {
       ...(select.id ? { id: record.id } : {}),
@@ -693,6 +761,15 @@ export class InMemoryPrismaService {
         : {}),
       ...(select.author && author
         ? { author: this.selectUser(author, select.author.select) }
+        : {}),
+      ...(select._count
+        ? {
+            _count: {
+              ...(select._count.select?.replies
+                ? { replies: replies.length }
+                : {}),
+            },
+          }
         : {}),
     };
   }
