@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 export const NOTIFICATION_TYPES = {
   postComment: 'post_comment',
   commentReply: 'comment_reply',
+  postLike: 'post_like',
+  privateMessage: 'private_message',
+  platformNotice: 'platform_notice',
 } as const;
 
 type NotificationType =
@@ -12,25 +15,38 @@ type NotificationType =
 type NotificationRow = {
   id: string;
   type: string;
+  title?: string | null;
+  body?: string | null;
   readAt?: Date | null;
   createdAt: Date;
-  postId: string;
-  commentId: string;
-  actor: {
+  postId?: string | null;
+  commentId?: string | null;
+  conversationId?: string | null;
+  messageId?: string | null;
+  actor?: {
     id: string;
     email: string;
     name?: string | null;
     username?: string | null;
-  };
-  post: {
+  } | null;
+  post?: {
     id: string;
     content: string;
-  };
-  comment: {
+    imageUrl?: string | null;
+  } | null;
+  comment?: {
     id: string;
     content: string;
     parentCommentId?: string | null;
-  };
+  } | null;
+  conversation?: {
+    id: string;
+  } | null;
+  message?: {
+    id: string;
+    content: string;
+    conversationId: string;
+  } | null;
 };
 
 @Injectable()
@@ -40,28 +56,40 @@ export class NotificationsService {
   private readonly notificationSelect = {
     id: true,
     type: true,
+    title: true,
+    body: true,
     readAt: true,
     createdAt: true,
     postId: true,
     commentId: true,
+    conversationId: true,
+    messageId: true,
     actor: { select: { id: true, email: true, name: true, username: true } },
-    post: { select: { id: true, content: true } },
+    post: { select: { id: true, content: true, imageUrl: true } },
     comment: {
       select: { id: true, content: true, parentCommentId: true },
     },
+    conversation: { select: { id: true } },
+    message: { select: { id: true, content: true, conversationId: true } },
   } as const;
 
   private mapNotification(notification: NotificationRow) {
     return {
       id: notification.id,
       type: notification.type,
+      title: notification.title ?? null,
+      body: notification.body ?? null,
       readAt: notification.readAt,
       createdAt: notification.createdAt,
-      postId: notification.postId,
-      commentId: notification.commentId,
-      actor: notification.actor,
-      post: notification.post,
-      comment: notification.comment,
+      postId: notification.postId ?? null,
+      commentId: notification.commentId ?? null,
+      conversationId: notification.conversationId ?? null,
+      messageId: notification.messageId ?? null,
+      actor: notification.actor ?? null,
+      post: notification.post ?? null,
+      comment: notification.comment ?? null,
+      conversation: notification.conversation ?? null,
+      message: notification.message ?? null,
     };
   }
 
@@ -144,6 +172,78 @@ export class NotificationsService {
         },
       });
     }
+  }
+
+  async notifyPostLiked({
+    postId,
+    actorId,
+  }: {
+    postId: string;
+    actorId: string;
+  }) {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
+      select: { authorId: true },
+    });
+
+    if (!post || post.authorId === actorId) {
+      return;
+    }
+
+    await this.prisma.notification.create({
+      data: {
+        type: NOTIFICATION_TYPES.postLike,
+        recipientId: post.authorId,
+        actorId,
+        postId,
+      },
+    });
+  }
+
+  async notifyPrivateMessageCreated({
+    conversationId,
+    messageId,
+    actorId,
+  }: {
+    conversationId: string;
+    messageId: string;
+    actorId: string;
+  }) {
+    const participants = await this.prisma.conversationParticipant.findMany({
+      where: { conversationId, userId: { not: actorId } },
+      select: { userId: true },
+    });
+
+    for (const participant of participants) {
+      await this.prisma.notification.create({
+        data: {
+          type: NOTIFICATION_TYPES.privateMessage,
+          recipientId: participant.userId,
+          actorId,
+          conversationId,
+          messageId,
+        },
+      });
+    }
+  }
+
+  async notifyPlatformNotice({
+    recipientId,
+    title,
+    body,
+  }: {
+    recipientId: string;
+    title: string;
+    body?: string | null;
+  }) {
+    await this.prisma.notification.create({
+      data: {
+        type: NOTIFICATION_TYPES.platformNotice,
+        recipientId,
+        title: title.trim(),
+        body: body?.trim() || null,
+      },
+    });
   }
 
   private async assertNotificationOwner(

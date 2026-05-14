@@ -1,371 +1,238 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AppTopbar from "./components/AppTopbar";
 import AuthScreen from "./components/AuthScreen";
-import CommentsPanel from "./components/CommentsPanel";
-import { Icon, WaveMark } from "./components/Icons";
-import NotificationsPanel from "./components/NotificationsPanel";
-import PostCard from "./components/PostCard";
 import RightRail from "./components/RightRail";
 import Sidebar from "./components/Sidebar";
+import { authenticate } from "./api/auth";
 import {
-  DEV_ACCOUNT,
-  REGISTER_MAX_INTERESTS,
-  REGISTER_ROLE_OPTIONS,
-  navItems,
-  suggestions,
-  trends,
-} from "./constants/uiData";
+  createPostComment,
+  deleteComment,
+  fetchPostComments,
+} from "./api/comments";
+import {
+  createConversationApi,
+  fetchConversationMessagesApi,
+  fetchConversationsApi,
+  markConversationReadApi,
+  sendConversationMessageApi,
+} from "./api/conversations";
+import {
+  fetchNotificationsApi,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "./api/notifications";
+import {
+  createPost,
+  deletePostApi,
+  fetchFeedPosts,
+  fetchTrendsApi,
+  registerPostView,
+  reportPostApi,
+  togglePostLike,
+} from "./api/posts";
+import { connectConversationsSocket } from "./api/realtime";
+import { uploadImage } from "./api/uploads";
+import {
+  activateEurecaPlus,
+  cancelEurecaPlus,
+  fetchFollowSuggestionsApi,
+  fetchMeApi,
+  fetchUser,
+  fetchUserFollowersApi,
+  fetchUserFollowingApi,
+  toggleUserFollowApi,
+} from "./api/users";
+import { DEV_ACCOUNT, REGISTER_MAX_INTERESTS } from "./constants/uiData";
+import {
+  COMMENT_MAX_LENGTH,
+  COMMENT_PREVIEW_PAGE_SIZE,
+  COMMENT_PREVIEW_POST_LIMIT,
+  COMMENT_REPLY_PAGE_SIZE,
+  COMMENT_ROOT_PAGE_SIZE,
+  REGISTER_PROFILE_INITIAL,
+} from "./features/app/appConstants";
+import {
+  adjustCommentRepliesCount,
+  getCommunityProgress,
+  getDiscoveryScore,
+  getPostImageValidationError,
+  loadViewedPostIds,
+  mergeCommentItems,
+  normalizeExploreText,
+  normalizeUsername,
+  removeCommentBranch,
+  saveViewedPostIds,
+} from "./features/app/appHelpers";
+import { useThemePreference } from "./hooks/useThemePreference";
+import AlertsView from "./views/AlertsView";
+import ConversationsView from "./views/ConversationsView";
+import ExploreView from "./views/ExploreView";
+import EurecaPlusView from "./views/EurecaPlusView";
+import HomeView from "./views/HomeView";
+import ProfileView from "./views/ProfileView";
+import SettingsView from "./views/SettingsView";
 import {
   emailToInitials,
   formatCount,
+  mapApiConversation,
   mapApiComment,
+  mapApiMessage,
   mapApiNotification,
   mapApiPost,
+  mapApiSuggestion,
+  mapApiTrend,
   truncateText,
 } from "./utils/formatters";
 import "./App.css";
 
-// Endereco base da API.
-// Em producao, isso pode vir da variavel VITE_API_URL; localmente cai no backend da porta 3000.
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
-const VIEWED_POSTS_STORAGE_KEY = "eureca_viewed_posts";
-const THEME_STORAGE_KEY = "eureca_theme_preference";
-const COMMENT_MAX_LENGTH = 280;
-const COMMENT_ROOT_PAGE_SIZE = 10;
-const COMMENT_REPLY_PAGE_SIZE = 5;
-const COMMENT_PREVIEW_PAGE_SIZE = 2;
-const COMMENT_PREVIEW_POST_LIMIT = 6;
-const THEME_OPTIONS = [
-  { value: "system", label: "Sistema" },
-  { value: "dark", label: "Escuro" },
-  { value: "light", label: "Claro" },
-];
-const COMPOSER_PROMPTS = [
-  { label: "Pedir feedback", text: "O que vocês acham desta ideia? " },
-  { label: "Mostrar progresso", text: "Atualização rápida: " },
-  { label: "Fazer pergunta", text: "Alguém já passou por isso? " },
-];
-const COMPOSER_TOOLS = [
-  { icon: "image", label: "Imagem" },
-  { icon: "smile", label: "Humor" },
-  { icon: "calendar", label: "Evento" },
-];
-const EXPLORE_FILTERS = [
-  { value: "all", label: "Tudo" },
-  { value: "discussions", label: "Discussões" },
-  { value: "popular", label: "Populares" },
-  { value: "recent", label: "Recentes" },
-  { value: "people", label: "Pessoas" },
-];
-const COMMUNITY_LEVELS = [
-  { min: 0, label: "Explorador" },
-  { min: 80, label: "Participante" },
-  { min: 220, label: "Colaborador" },
-  { min: 520, label: "Referência" },
-  { min: 1000, label: "Mentor" },
-];
-const REGISTER_PROFILE_INITIAL = {
-  name: "",
-  username: "",
-  role: REGISTER_ROLE_OPTIONS[0],
-  bio: "",
-  interests: [],
-  acceptedTerms: false,
-};
-
-// Contato ficticio usado para preencher a tela de conversas enquanto o chat real nao existe.
-const CHAT_BOT_CONTACT = {
-  id: "eureca-bot",
-  name: "Eureca Bot",
-  handle: "@eureca_bot",
-  initials: "EB",
-  status: "online",
-  preview: "Olá! Este é o chat de teste da Eureca.",
-};
-
-// Mensagens mockadas para simular uma conversa pronta.
-const CHAT_BOT_MESSAGES = [
+const CONVERSATION_LIST_POLL_MS = 12000;
+const ACTIVE_CONVERSATION_POLL_MS = 5000;
+const REPORT_REASONS = [
   {
-    id: "bot-1",
-    sender: "bot",
-    text: "Olá! Eu sou o bot de teste da Eureca.",
-    time: "09:41",
+    value: "Conteúdo impróprio no contexto acadêmico",
+    description: "Linguagem, imagem ou abordagem inadequada para a comunidade.",
   },
   {
-    id: "bot-2",
-    sender: "bot",
-    text: "Aqui vai aparecer o chat em tempo real no futuro. Por agora, esta tela já simula a experiência de conversa.",
-    time: "09:42",
+    value: "Conteúdo sexual sem fundamento acadêmico",
+    description:
+      "Material sexualizado sem relevância para estudo, pesquisa ou debate.",
+  },
+  {
+    value: "Assédio, humilhação ou ataque pessoal",
+    description: "Ataques a estudantes, docentes, investigadores ou grupos.",
+  },
+  {
+    value: "Plágio ou uso indevido de trabalho acadêmico",
+    description: "Apropriação de texto, imagem, dados ou autoria sem crédito.",
+  },
+  {
+    value: "Desinformação científica ou acadêmica",
+    description:
+      "Afirmações enganosas apresentadas como conhecimento validado.",
+  },
+  {
+    value: "Spam, autopromoção ou conteúdo fora do tema",
+    description: "Publicação repetitiva, irrelevante ou puramente promocional.",
   },
 ];
+const TREND_STOP_WORDS = new Set([
+  "a",
+  "agora",
+  "ao",
+  "as",
+  "com",
+  "da",
+  "de",
+  "do",
+  "dos",
+  "e",
+  "em",
+  "eu",
+  "mais",
+  "meu",
+  "minha",
+  "no",
+  "nos",
+  "o",
+  "os",
+  "para",
+  "por",
+  "que",
+  "se",
+  "um",
+  "uma",
+]);
 
-function loadViewedPostIds() {
-  try {
-    const raw = sessionStorage.getItem(VIEWED_POSTS_STORAGE_KEY);
-    const parsed = JSON.parse(raw ?? "[]");
-    return new Set(
-      Array.isArray(parsed)
-        ? parsed.filter((id) => typeof id === "string")
-        : [],
-    );
-  } catch {
-    return new Set();
-  }
-}
-
-function saveViewedPostIds(ids) {
-  try {
-    sessionStorage.setItem(VIEWED_POSTS_STORAGE_KEY, JSON.stringify([...ids]));
-  } catch {
-    // Se o navegador bloquear sessionStorage, a API continua a funcionar sem dedupe local.
-  }
-}
-
-function getSystemTheme() {
-  if (typeof window === "undefined" || !window.matchMedia) {
-    return "dark";
-  }
-
-  return window.matchMedia("(prefers-color-scheme: light)").matches
-    ? "light"
-    : "dark";
-}
-
-function isThemePreference(value) {
-  return THEME_OPTIONS.some((option) => option.value === value);
-}
-
-function loadThemePreference() {
-  try {
-    const savedPreference = localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemePreference(savedPreference) ? savedPreference : "dark";
-  } catch {
-    return "dark";
-  }
-}
-
-function saveThemePreference(preference) {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, preference);
-  } catch {
-    // O tema continua funcionando em memoria se o navegador bloquear localStorage.
-  }
-}
-
-function getPostFeedContext(post, index) {
-  const replies = Number(post?.counts?.replies ?? 0);
-  const likes = Number(post?.counts?.likes ?? 0);
-  const views = Number(post?.counts?.views ?? 0);
-
-  if (replies > 0) {
-    return {
-      label: replies >= 3 ? "Discussão movimentada" : "Conversa acontecendo",
-      meta: `${formatCount(replies)} ${replies === 1 ? "comentário" : "comentários"}`,
-    };
-  }
-
-  if (views >= 50) {
-    return {
-      label: "Popular na comunidade",
-      meta: `${formatCount(views)} views`,
-    };
-  }
-
-  if (likes > 0) {
-    return {
-      label: "Recebendo reações",
-      meta: `${formatCount(likes)} ${likes === 1 ? "curtida" : "curtidas"}`,
-    };
-  }
-
-  if (index === 0) {
-    return {
-      label: "Mais recente",
-      meta: `Publicado ${post?.time ?? "agora"}`,
-    };
-  }
-
-  return {
-    label: "Publicação do feed",
-    meta: `${post?.name ?? "Alguém"} · ${post?.time ?? "agora"}`,
-  };
-}
-
-function getDiscoveryScore(post) {
-  return (
-    Number(post?.counts?.replies ?? 0) * 8 +
-    Number(post?.counts?.likes ?? 0) * 4 +
-    Number(post?.counts?.views ?? 0)
-  );
-}
-
-function normalizeExploreText(value) {
+function normalizeTopicLabel(value) {
   return String(value ?? "")
-    .trim()
-    .toLowerCase();
+    .replace(/^#/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function getCommunityProgress(user, userPosts) {
-  const safePosts = Array.isArray(userPosts) ? userPosts : [];
-  const interestsCount = Array.isArray(user?.interests)
-    ? user.interests.length
-    : 0;
-  const postsCount = safePosts.length;
-  const commentsCount = safePosts.reduce(
-    (total, post) => total + Number(post.counts?.replies ?? 0),
-    0,
-  );
-  const likesCount = safePosts.reduce(
-    (total, post) => total + Number(post.counts?.likes ?? 0),
-    0,
-  );
-  const viewsCount = safePosts.reduce(
-    (total, post) => total + Number(post.counts?.views ?? 0),
-    0,
-  );
-  const profileChecks = [
-    Boolean(user?.name?.trim()),
-    Boolean(user?.username?.trim()),
-    Boolean(user?.role?.trim()),
-    Boolean(user?.bio?.trim()),
-    interestsCount > 0,
-    postsCount > 0,
-  ];
-  const profileCompletion = Math.round(
-    (profileChecks.filter(Boolean).length / profileChecks.length) * 100,
-  );
-  const score =
-    postsCount * 16 +
-    commentsCount * 9 +
-    likesCount * 5 +
-    Math.floor(viewsCount / 5) +
-    Math.min(interestsCount, REGISTER_MAX_INTERESTS) * 3 +
-    Math.floor(profileCompletion / 10);
-  const currentLevel =
-    [...COMMUNITY_LEVELS].reverse().find((level) => score >= level.min) ??
-    COMMUNITY_LEVELS[0];
-  const currentLevelIndex = COMMUNITY_LEVELS.findIndex(
-    (level) => level.label === currentLevel.label,
-  );
-  const nextLevel = COMMUNITY_LEVELS[currentLevelIndex + 1] ?? null;
-  const levelProgress = nextLevel
-    ? Math.min(
-        100,
-        Math.round(
-          ((score - currentLevel.min) / (nextLevel.min - currentLevel.min)) *
-            100,
-        ),
-      )
-    : 100;
-  const remainingScore = nextLevel ? Math.max(0, nextLevel.min - score) : 0;
-  const achievements = [
-    {
-      label: "Primeiro post",
-      meta: "Publicou na comunidade",
-      unlocked: postsCount > 0,
-    },
-    {
-      label: "Conversa aberta",
-      meta: "Recebeu comentários",
-      unlocked: commentsCount > 0,
-    },
-    {
-      label: "Perfil confiável",
-      meta: "Completou 80% do perfil",
-      unlocked: profileCompletion >= 80,
-    },
-    {
-      label: "Alcance inicial",
-      meta: "Chegou a 100 views",
-      unlocked: viewsCount >= 100,
-    },
-  ];
-  const nextAction =
-    postsCount === 0
-      ? "Publique seu primeiro post para começar a ganhar score."
-      : profileCompletion < 80
-        ? "Complete seu perfil para aumentar confiança."
-        : commentsCount === 0
-          ? "Crie posts que puxem respostas da comunidade."
-          : nextLevel
-            ? `Faltam ${formatCount(remainingScore)} pontos para ${nextLevel.label}.`
-            : "Você já chegou ao nível mais alto desta etapa.";
+function buildFeedTrends(posts) {
+  const topics = new Map();
 
-  return {
-    score,
-    postsCount,
-    commentsCount,
-    likesCount,
-    viewsCount,
-    interestsCount,
-    profileCompletion,
-    currentLevel,
-    nextLevel,
-    levelProgress,
-    remainingScore,
-    achievements,
-    nextAction,
-  };
-}
+  posts.forEach((post) => {
+    const text = post.text ?? "";
+    const foundInPost = new Set();
+    const addTopic = (rawTitle, category = "Feed") => {
+      const label = normalizeTopicLabel(rawTitle);
+      if (label.length < 3) return;
 
-function normalizeUsername(value) {
-  return String(value ?? "")
-    .trim()
-    .replace(/^@+/, "")
-    .toLowerCase();
-}
+      const key = label.toLowerCase();
+      if (foundInPost.has(key)) return;
+      foundInPost.add(key);
 
-function removeCommentBranch(items, commentId) {
-  const idsToRemove = new Set([commentId]);
-  let changed = true;
+      const current = topics.get(key) ?? {
+        title: `#${label.replace(/\s+/g, "")}`,
+        category,
+        postsCount: 0,
+        score: 0,
+        latestAt: post.createdAt,
+      };
+      const score =
+        Number(post.counts?.replies ?? 0) * 6 +
+        Number(post.counts?.likes ?? 0) * 3 +
+        Number(post.counts?.views ?? 0) +
+        1;
 
-  while (changed) {
-    changed = false;
-    items.forEach((comment) => {
-      if (comment.parentCommentId && idsToRemove.has(comment.parentCommentId)) {
-        if (!idsToRemove.has(comment.id)) {
-          idsToRemove.add(comment.id);
-          changed = true;
-        }
+      current.postsCount += 1;
+      current.score += score;
+      if (String(post.createdAt ?? "") > String(current.latestAt ?? "")) {
+        current.latestAt = post.createdAt;
       }
-    });
-  }
-
-  return items.filter((comment) => !idsToRemove.has(comment.id));
-}
-
-function mergeCommentItems(currentItems, incomingItems) {
-  const byId = new Map();
-  const allItems = [...(currentItems ?? []), ...(incomingItems ?? [])];
-
-  allItems.forEach((comment) => {
-    if (comment?.id) {
-      byId.set(comment.id, { ...(byId.get(comment.id) ?? {}), ...comment });
-    }
-  });
-
-  return [...byId.values()].sort((left, right) => {
-    const leftTime = new Date(left.createdAt ?? 0).getTime();
-    const rightTime = new Date(right.createdAt ?? 0).getTime();
-
-    if (leftTime !== rightTime) {
-      return leftTime - rightTime;
-    }
-
-    return String(left.id).localeCompare(String(right.id));
-  });
-}
-
-function adjustCommentRepliesCount(items, parentCommentId, delta) {
-  if (!parentCommentId) return items;
-
-  return items.map((comment) => {
-    if (comment.id !== parentCommentId) return comment;
-
-    return {
-      ...comment,
-      repliesCount: Math.max(0, Number(comment.repliesCount ?? 0) + delta),
+      topics.set(key, current);
     };
+
+    for (const match of text.matchAll(/#[\p{L}\p{N}_-]+/gu)) {
+      addTopic(match[0], "Hashtag");
+    }
+
+    if (post.authorBadge?.label && post.authorBadge.label !== "Membro") {
+      addTopic(post.authorBadge.label, "Perfil");
+    }
+
+    text
+      .match(/[\p{L}\p{N}][\p{L}\p{N}_-]{3,}/gu)
+      ?.slice(0, 18)
+      .forEach((word) => {
+        const normalized = word.toLowerCase();
+        if (!TREND_STOP_WORDS.has(normalized)) {
+          addTopic(word, "Conversa");
+        }
+      });
   });
+
+  return [...topics.values()]
+    .filter((topic) => topic.postsCount > 1 || topic.category !== "Conversa")
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return String(right.latestAt ?? "").localeCompare(
+        String(left.latestAt ?? ""),
+      );
+    })
+    .slice(0, 4)
+    .map((topic) => ({
+      ...topic,
+      posts: `${formatCount(topic.postsCount)} ${
+        topic.postsCount === 1 ? "post" : "posts"
+      }`,
+    }));
+}
+
+function mergeMessagesById(items, message) {
+  const byId = new Map();
+  [...(items ?? []), message].forEach((item) => {
+    if (item?.id) byId.set(item.id, item);
+  });
+
+  return [...byId.values()].sort(
+    (left, right) =>
+      new Date(left.createdAt ?? 0).getTime() -
+      new Date(right.createdAt ?? 0).getTime(),
+  );
 }
 
 function App() {
@@ -390,31 +257,60 @@ function App() {
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
-  const [themePreference, setThemePreference] = useState(loadThemePreference);
-  const [systemTheme, setSystemTheme] = useState(getSystemTheme);
+  const [profileSocial, setProfileSocial] = useState({
+    followers: [],
+    following: [],
+    loading: false,
+    error: "",
+  });
+  const { resolvedTheme, themePreference, themeSummary, setThemePreference } =
+    useThemePreference();
 
   // Estados do feed, criacao de posts e feedbacks visuais para o usuario.
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [feedError, setFeedError] = useState("");
+  const [feedMode, setFeedMode] = useState("for-you");
   const [content, setContent] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
+  const [composerImage, setComposerImage] = useState(null);
+  const [imageUploadLoading, setImageUploadLoading] = useState(false);
   const [composerError, setComposerError] = useState("");
   const [composerNotice, setComposerNotice] = useState("");
   const [activeCommentsPostId, setActiveCommentsPostId] = useState("");
   const [commentsByPost, setCommentsByPost] = useState({});
+  const [reportDialog, setReportDialog] = useState({
+    postId: "",
+    selectedReason: REPORT_REASONS[0].value,
+    loading: false,
+    error: "",
+  });
   const [exploreQuery, setExploreQuery] = useState("");
   const [exploreFilter, setExploreFilter] = useState("all");
+  const [liveTrends, setLiveTrends] = useState([]);
+  const [followSuggestions, setFollowSuggestions] = useState([]);
+  const [followActionUserId, setFollowActionUserId] = useState("");
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState("");
   const [notificationsNotice, setNotificationsNotice] = useState("");
-  const [selectedConversationId, setSelectedConversationId] = useState(
-    CHAT_BOT_CONTACT.id,
-  );
+  const [conversations, setConversations] = useState([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
+  const [conversationsError, setConversationsError] = useState("");
+  const [activeConversationId, setActiveConversationId] = useState("");
+  const [conversationMessagesById, setConversationMessagesById] = useState({});
+  const [conversationStarting, setConversationStarting] = useState(false);
+  const [conversationSocketConnected, setConversationSocketConnected] =
+    useState(false);
   const userMenuRef = useRef(null);
   const composerInputRef = useRef(null);
+  const composerImageInputRef = useRef(null);
+  const imageUploadIdRef = useRef(0);
   const viewedPostIdsRef = useRef(null);
+  const conversationsPollInFlightRef = useRef(false);
+  const activeMessagesPollInFlightRef = useRef(false);
+  const activeConversationIdRef = useRef("");
+  const currentUserIdRef = useRef("");
 
   if (viewedPostIdsRef.current === null) {
     viewedPostIdsRef.current = loadViewedPostIds();
@@ -438,16 +334,11 @@ function App() {
     profileUser?.bio?.trim() ||
     "Conta da Eureca. Aqui você pode ver informações básicas da sessão e seus posts publicados.";
   const composerHasContent = content.trim().length > 0;
-  const resolvedTheme =
-    themePreference === "system" ? systemTheme : themePreference;
-  const selectedThemeLabel =
-    THEME_OPTIONS.find((option) => option.value === themePreference)?.label ??
-    "Escuro";
-  const themeSummary =
-    themePreference === "system"
-      ? `Sistema (${systemTheme === "light" ? "claro" : "escuro"})`
-      : selectedThemeLabel;
-
+  const composerHasImage = Boolean(composerImage);
+  const composerCanPost =
+    composerHasContent &&
+    !imageUploadLoading &&
+    (!composerImage || Boolean(composerImage.imageUrl));
   // Gera as iniciais do usuario ativo para avatar e pequenos badges.
   const userInitial = useMemo(
     () => emailToInitials(sessionName),
@@ -503,10 +394,124 @@ function App() {
   const profileCreatedAt = profileUser?.createdAt
     ? new Date(profileUser.createdAt).toLocaleDateString("pt-BR")
     : "Sessão ativa";
+  const resolvedTrends = useMemo(() => {
+    if (liveTrends.length) return liveTrends;
+    return buildFeedTrends(posts);
+  }, [liveTrends, posts]);
+  const resolvedFollowSuggestions = useMemo(() => {
+    const byId = new Map();
+
+    posts.forEach((post) => {
+      if (!post.authorId || post.authorId === me?.id) return;
+
+      const current = byId.get(post.authorId) ?? {
+        id: post.authorId,
+        initials: post.initials,
+        name: post.name,
+        handle: post.handle,
+        badge: post.authorBadge?.label ?? post.authorRole ?? "Membro",
+        context: "",
+        mutual: "",
+        status: "active",
+        followersCount: 0,
+        postsCount: 0,
+        following: false,
+        score: 0,
+        post,
+        user: {
+          id: post.authorId,
+          email: post.authorEmail,
+          name: post.name,
+          username: post.handle?.replace(/^@/, ""),
+          role: post.authorRole,
+          createdAt: post.createdAt,
+        },
+      };
+
+      current.postsCount += 1;
+      current.score += getDiscoveryScore(post);
+      current.context = truncateText(post.text, 72);
+      current.mutual = `${formatCount(current.postsCount)} ${
+        current.postsCount === 1 ? "post" : "posts"
+      } no feed`;
+      byId.set(post.authorId, current);
+    });
+
+    followSuggestions.forEach((person) => {
+      if (!person.id || person.id === me?.id) return;
+
+      const current = byId.get(person.id);
+      byId.set(person.id, {
+        ...person,
+        post: current?.post ?? person.post ?? null,
+        score: Number(current?.score ?? person.score ?? 0),
+        postsCount: Number(current?.postsCount ?? person.postsCount ?? 0),
+        context: current?.context || person.context,
+        mutual: current?.mutual || person.mutual,
+      });
+    });
+
+    return [...byId.values()]
+      .sort((left, right) => {
+        if (Boolean(right.post) !== Boolean(left.post)) {
+          return right.post ? 1 : -1;
+        }
+
+        return Number(right.score ?? 0) - Number(left.score ?? 0);
+      })
+      .slice(0, 3);
+  }, [followSuggestions, me?.id, posts]);
   const unreadNotificationsCount = useMemo(
     () => notifications.filter((notification) => !notification.readAt).length,
     [notifications],
   );
+  const activeConversation =
+    conversations.find(
+      (conversation) => conversation.id === activeConversationId,
+    ) ?? null;
+  const activeConversationState =
+    conversationMessagesById[activeConversationId] ?? {};
+  const conversationCandidates = useMemo(() => {
+    const byAuthorId = new Map();
+
+    posts.forEach((post) => {
+      if (!post.authorId || post.authorId === me?.id) return;
+
+      const current = byAuthorId.get(post.authorId);
+      if (current) {
+        current.postsCount += 1;
+        current.latestPost = current.latestPost ?? post;
+        return;
+      }
+
+      byAuthorId.set(post.authorId, {
+        id: post.authorId,
+        name: post.name,
+        handle: post.handle,
+        email: post.authorEmail,
+        initials: post.initials,
+        role: post.authorRole || post.authorBadge?.label || "Membro",
+        context: truncateText(post.text, 72),
+        postsCount: 1,
+        latestPost: post,
+      });
+    });
+
+    return [...byAuthorId.values()].sort((left, right) =>
+      String(right.latestPost?.createdAt ?? "").localeCompare(
+        String(left.latestPost?.createdAt ?? ""),
+      ),
+    );
+  }, [me?.id, posts]);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    currentUserIdRef.current = me?.id ?? "";
+  }, [me?.id]);
+
   const feedOverview = useMemo(() => {
     const comments = posts.reduce(
       (total, post) => total + Number(post.counts?.replies ?? 0),
@@ -586,7 +591,7 @@ function App() {
           new Date(left.post.createdAt ?? 0).getTime()
         );
       });
-    const topicMatches = trends.filter((trend) =>
+    const topicMatches = resolvedTrends.filter((trend) =>
       matchesQuery(trend.title, trend.category, trend.posts),
     );
     const authorMap = new Map();
@@ -615,7 +620,7 @@ function App() {
 
     const peopleByHandle = new Map();
 
-    [...authorMap.values(), ...suggestions].forEach((person) => {
+    [...authorMap.values(), ...resolvedFollowSuggestions].forEach((person) => {
       const handle = person.handle ?? "";
       if (!handle || peopleByHandle.has(handle)) return;
 
@@ -657,7 +662,13 @@ function App() {
       people,
       totalMatches: scoredPosts.length + topicMatches.length + people.length,
     };
-  }, [exploreFilter, exploreQuery, posts]);
+  }, [
+    exploreFilter,
+    exploreQuery,
+    posts,
+    resolvedFollowSuggestions,
+    resolvedTrends,
+  ]);
   const communityProgress = useMemo(
     () => getCommunityProgress(me, myPosts),
     [me, myPosts],
@@ -669,29 +680,25 @@ function App() {
 
   // Busca a lista de posts e converte o formato da API para o formato esperado pela interface.
   const fetchPosts = useCallback(
-    async (authToken = token) => {
+    async (authToken = token, mode = feedMode) => {
       const safeToken = typeof authToken === "string" ? authToken : token;
+      const safeMode =
+        mode === "following" && safeToken ? "following" : "for-you";
       setPostsLoading(true);
       setFeedError("");
 
       try {
-        const endpoint = safeToken
-          ? `${API_BASE}/posts/me/feed`
-          : `${API_BASE}/posts`;
-        const res = await fetch(endpoint, {
-          headers: safeToken
-            ? { Authorization: `Bearer ${safeToken}` }
-            : undefined,
-        });
-        const data = await res.json();
+        const result = await fetchFeedPosts(safeToken, safeMode);
 
-        if (!res.ok) {
-          setFeedError(data?.message ?? "Não foi possível carregar o feed.");
+        if (!result.ok) {
+          setFeedError(
+            result.data?.message ?? "Não foi possível carregar o feed.",
+          );
           setPosts([]);
           return;
         }
 
-        setPosts(Array.isArray(data) ? data.map(mapApiPost) : []);
+        setPosts(Array.isArray(result.data) ? result.data.map(mapApiPost) : []);
       } catch {
         setFeedError("Backend indisponível. Inicie a API para carregar posts.");
         setPosts([]);
@@ -699,8 +706,100 @@ function App() {
         setPostsLoading(false);
       }
     },
+    [feedMode, token],
+  );
+
+  const fetchTrends = useCallback(async () => {
+    try {
+      const result = await fetchTrendsApi();
+
+      if (!result.ok) {
+        setLiveTrends([]);
+        return;
+      }
+
+      const nextTrends = Array.isArray(result.data)
+        ? result.data.map(mapApiTrend)
+        : [];
+      setLiveTrends(nextTrends);
+    } catch {
+      setLiveTrends([]);
+    }
+  }, []);
+
+  const fetchFollowSuggestions = useCallback(
+    async (authToken = token) => {
+      const safeToken = typeof authToken === "string" ? authToken : token;
+
+      if (!safeToken) {
+        setFollowSuggestions([]);
+        return;
+      }
+
+      try {
+        const result = await fetchFollowSuggestionsApi(safeToken);
+
+        if (!result.ok) {
+          setFollowSuggestions([]);
+          return;
+        }
+
+        const nextSuggestions = Array.isArray(result.data)
+          ? result.data.map(mapApiSuggestion)
+          : [];
+        setFollowSuggestions(nextSuggestions);
+      } catch {
+        setFollowSuggestions([]);
+      }
+    },
     [token],
   );
+
+  const fetchProfileSocial = useCallback(async (userId) => {
+    if (!userId) {
+      setProfileSocial({
+        followers: [],
+        following: [],
+        loading: false,
+        error: "",
+      });
+      return;
+    }
+
+    setProfileSocial((prev) => ({ ...prev, loading: true, error: "" }));
+
+    try {
+      const [followersResult, followingResult] = await Promise.all([
+        fetchUserFollowersApi(userId),
+        fetchUserFollowingApi(userId),
+      ]);
+
+      if (!followersResult.ok || !followingResult.ok) {
+        throw new Error("Não foi possível carregar conexões do perfil.");
+      }
+
+      setProfileSocial({
+        followers: Array.isArray(followersResult.data)
+          ? followersResult.data
+          : [],
+        following: Array.isArray(followingResult.data)
+          ? followingResult.data
+          : [],
+        loading: false,
+        error: "",
+      });
+    } catch (error) {
+      setProfileSocial({
+        followers: [],
+        following: [],
+        loading: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar conexões do perfil.",
+      });
+    }
+  }, []);
 
   const fetchNotifications = useCallback(
     async (authToken = token) => {
@@ -715,13 +814,10 @@ function App() {
       setNotificationsError("");
 
       try {
-        const res = await fetch(`${API_BASE}/notifications`, {
-          headers: { Authorization: `Bearer ${safeToken}` },
-        });
-        const data = await res.json().catch(() => []);
+        const result = await fetchNotificationsApi(safeToken);
 
-        if (!res.ok) {
-          if (res.status === 401) {
+        if (!result.ok) {
+          if (result.status === 401) {
             setToken("");
             setNotifications([]);
             setNotificationsError("Sua sessão expirou. Faça login novamente.");
@@ -729,18 +825,19 @@ function App() {
           }
 
           throw new Error(
-            data?.message ?? "Não foi possível carregar os alertas.",
+            result.data?.message ??
+              "Não foi possível carregar as notificações.",
           );
         }
 
         setNotifications(
-          Array.isArray(data) ? data.map(mapApiNotification) : [],
+          Array.isArray(result.data) ? result.data.map(mapApiNotification) : [],
         );
       } catch (error) {
         setNotificationsError(
           error instanceof Error
             ? error.message
-            : "Não foi possível carregar os alertas.",
+            : "Não foi possível carregar as notificações.",
         );
       } finally {
         setNotificationsLoading(false);
@@ -749,15 +846,215 @@ function App() {
     [token],
   );
 
+  const fetchConversations = useCallback(
+    async (safeToken = token, options = {}) => {
+      const silent = Boolean(options.silent);
+
+      if (!safeToken) {
+        setConversations([]);
+        setActiveConversationId("");
+        return [];
+      }
+
+      if (!silent) {
+        setConversationsLoading(true);
+        setConversationsError("");
+      }
+
+      try {
+        const result = await fetchConversationsApi(safeToken);
+
+        if (!result.ok) {
+          if (result.status === 401) {
+            setToken("");
+            throw new Error("Sua sessão expirou. Faça login novamente.");
+          }
+
+          throw new Error(
+            result.data?.message ?? "Não foi possível carregar as conversas.",
+          );
+        }
+
+        const mapped = Array.isArray(result.data)
+          ? result.data.map((conversation) => mapApiConversation(conversation))
+          : [];
+        setConversations(mapped);
+        setActiveConversationId((current) => {
+          if (
+            current &&
+            mapped.some((conversation) => conversation.id === current)
+          ) {
+            return current;
+          }
+
+          return mapped[0]?.id ?? "";
+        });
+        setConversationsError("");
+        return mapped;
+      } catch (error) {
+        if (!silent) {
+          setConversationsError(
+            error instanceof Error
+              ? error.message
+              : "Não foi possível carregar as conversas.",
+          );
+        }
+        return [];
+      } finally {
+        if (!silent) setConversationsLoading(false);
+      }
+    },
+    [token],
+  );
+
+  const loadConversationMessages = useCallback(
+    async (conversationId, options = {}) => {
+      if (!token || !conversationId) return false;
+
+      const append = Boolean(options.append);
+      const silent = Boolean(options.silent);
+      const mergeLatest = Boolean(options.mergeLatest);
+      const current = conversationMessagesById[conversationId] ?? {};
+      const cursor = append ? current.nextCursor : null;
+
+      if (append && (!current.hasMore || !cursor)) return false;
+
+      setConversationMessagesById((prev) => {
+        const existing = prev[conversationId] ?? {};
+        return {
+          ...prev,
+          [conversationId]: {
+            ...existing,
+            items: existing.items ?? [],
+            draft: existing.draft ?? "",
+            hasMore: Boolean(existing.hasMore),
+            nextCursor: existing.nextCursor ?? null,
+            sending: Boolean(existing.sending),
+            loading: append || silent ? Boolean(existing.loading) : true,
+            loadingMore: append,
+            error: silent ? (existing.error ?? "") : "",
+          },
+        };
+      });
+
+      try {
+        const result = await fetchConversationMessagesApi(
+          token,
+          conversationId,
+          {
+            cursor,
+            limit: 30,
+          },
+        );
+
+        if (!result.ok) {
+          if (result.status === 401) {
+            setToken("");
+            throw new Error("Sua sessão expirou. Faça login novamente.");
+          }
+
+          throw new Error(
+            result.data?.message ?? "Não foi possível carregar as mensagens.",
+          );
+        }
+
+        const incoming = Array.isArray(result.data?.items)
+          ? result.data.items.map((message) => mapApiMessage(message))
+          : [];
+
+        setConversationMessagesById((prev) => {
+          const existing = prev[conversationId] ?? {};
+          let nextItems = incoming;
+
+          if (append) {
+            nextItems = [...incoming, ...(existing.items ?? [])];
+          } else if (mergeLatest) {
+            const byId = new Map();
+            [...(existing.items ?? []), ...incoming].forEach((message) => {
+              if (message?.id) byId.set(message.id, message);
+            });
+            nextItems = [...byId.values()].sort(
+              (left, right) =>
+                new Date(left.createdAt ?? 0).getTime() -
+                new Date(right.createdAt ?? 0).getTime(),
+            );
+          }
+
+          return {
+            ...prev,
+            [conversationId]: {
+              ...existing,
+              items: nextItems,
+              draft: existing.draft ?? "",
+              hasMore: mergeLatest
+                ? Boolean(existing.hasMore || result.data?.hasMore)
+                : Boolean(result.data?.hasMore),
+              nextCursor: mergeLatest
+                ? (existing.nextCursor ?? result.data?.nextCursor ?? null)
+                : (result.data?.nextCursor ?? null),
+              loading: false,
+              loadingMore: false,
+              sending: Boolean(existing.sending),
+              error: "",
+            },
+          };
+        });
+        return true;
+      } catch (error) {
+        setConversationMessagesById((prev) => {
+          const existing = prev[conversationId] ?? {};
+          return {
+            ...prev,
+            [conversationId]: {
+              ...existing,
+              items: existing.items ?? [],
+              draft: existing.draft ?? "",
+              hasMore: Boolean(existing.hasMore),
+              nextCursor: existing.nextCursor ?? null,
+              loading: false,
+              loadingMore: false,
+              sending: silent ? Boolean(existing.sending) : false,
+              error:
+                silent && existing.error
+                  ? existing.error
+                  : error instanceof Error
+                    ? error.message
+                    : "Não foi possível carregar as mensagens.",
+            },
+          };
+        });
+        return false;
+      }
+    },
+    [conversationMessagesById, token],
+  );
+
+  const markConversationAsRead = useCallback(
+    async (conversationId) => {
+      if (!token || !conversationId) return false;
+
+      const result = await markConversationReadApi(token, conversationId);
+      if (!result.ok) return false;
+
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, unreadCount: 0 }
+            : conversation,
+        ),
+      );
+      return true;
+    },
+    [token],
+  );
+
   // Consulta a rota protegida /users/me para descobrir quem esta autenticado.
   const fetchMe = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/users/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const result = await fetchMeApi(token);
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
         }
         setMe(null);
@@ -765,8 +1062,7 @@ function App() {
         return;
       }
 
-      const data = await res.json();
-      const user = data?.user ?? null;
+      const user = result.data?.user ?? null;
       setMe(user);
       if (user?.email) {
         setEmail(user.email);
@@ -783,30 +1079,9 @@ function App() {
       localStorage.setItem("eureca_token", token);
     } else {
       localStorage.removeItem("eureca_token");
+      setFeedMode("for-you");
     }
   }, [token]);
-
-  // Guarda a preferencia de tema para preservar a escolha ao recarregar a pagina.
-  useEffect(() => {
-    saveThemePreference(themePreference);
-  }, [themePreference]);
-
-  // Mantem a opcao "Sistema" alinhada com o tema do navegador enquanto a aba esta aberta.
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
-    const updateSystemTheme = (event) => {
-      setSystemTheme(event.matches ? "light" : "dark");
-    };
-
-    setSystemTheme(mediaQuery.matches ? "light" : "dark");
-    mediaQuery.addEventListener("change", updateSystemTheme);
-
-    return () => mediaQuery.removeEventListener("change", updateSystemTheme);
-  }, []);
 
   // Fecha o menu do usuario quando a pessoa clica fora dele.
   useEffect(() => {
@@ -822,20 +1097,222 @@ function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [userMenuOpen]);
 
+  useEffect(() => {
+    const previewUrl = composerImage?.previewUrl;
+
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [composerImage?.previewUrl]);
+
   // Sempre que o token muda, recarrega o feed.
   // Sem token, busca o feed publico; com token, busca o feed personalizado.
   useEffect(() => {
-    fetchPosts(token);
-  }, [fetchPosts, token]);
+    fetchPosts(token, feedMode);
+  }, [feedMode, fetchPosts, token]);
+
+  useEffect(() => {
+    void fetchTrends();
+  }, [fetchTrends, posts.length]);
+
+  useEffect(() => {
+    void fetchFollowSuggestions(token);
+  }, [fetchFollowSuggestions, token, posts.length]);
+
+  useEffect(() => {
+    if (currentView !== "profile" || !profileUser?.id) {
+      setProfileSocial({
+        followers: [],
+        following: [],
+        loading: false,
+        error: "",
+      });
+      return;
+    }
+
+    void fetchProfileSocial(profileUser.id);
+  }, [currentView, fetchProfileSocial, profileUser?.id]);
 
   useEffect(() => {
     if (!token) {
       setNotifications([]);
+      setConversations([]);
+      setActiveConversationId("");
+      setConversationMessagesById({});
       return;
     }
 
     fetchNotifications(token);
   }, [fetchNotifications, token]);
+
+  useEffect(() => {
+    if (!token || currentView !== "conversations") return;
+
+    fetchConversations(token);
+  }, [currentView, fetchConversations, token]);
+
+  useEffect(() => {
+    if (!token) {
+      setConversationSocketConnected(false);
+      return undefined;
+    }
+
+    const socket = connectConversationsSocket(token);
+
+    socket.on("connect", () => setConversationSocketConnected(true));
+    socket.on("disconnect", () => setConversationSocketConnected(false));
+    socket.on("connect_error", () => setConversationSocketConnected(false));
+    socket.on("conversation:message", (payload) => {
+      const message = mapApiMessage(payload?.message ?? payload);
+      if (!message.id || !message.conversationId) return;
+
+      const isActive =
+        activeConversationIdRef.current === message.conversationId;
+      const isMine = message.senderId === currentUserIdRef.current;
+
+      setConversationMessagesById((prev) => {
+        const existing = prev[message.conversationId];
+        if (!existing && !isActive) return prev;
+
+        return {
+          ...prev,
+          [message.conversationId]: {
+            ...existing,
+            items: mergeMessagesById(existing?.items ?? [], message),
+            draft: existing?.draft ?? "",
+            hasMore: Boolean(existing?.hasMore),
+            nextCursor: existing?.nextCursor ?? null,
+            loading: false,
+            loadingMore: false,
+            sending: Boolean(existing?.sending),
+            error: "",
+          },
+        };
+      });
+
+      let conversationExists = false;
+      setConversations((prev) => {
+        conversationExists = prev.some(
+          (conversation) => conversation.id === message.conversationId,
+        );
+
+        return prev
+          .map((conversation) =>
+            conversation.id === message.conversationId
+              ? {
+                  ...conversation,
+                  lastMessage: message,
+                  preview: message.text,
+                  time: message.time,
+                  updatedAt: message.createdAt,
+                  unreadCount:
+                    isActive || isMine
+                      ? 0
+                      : Number(conversation.unreadCount ?? 0) + 1,
+                }
+              : conversation,
+          )
+          .sort((left, right) =>
+            String(right.updatedAt).localeCompare(String(left.updatedAt)),
+          );
+      });
+
+      if (!conversationExists) {
+        void fetchConversations(token, { silent: true });
+      }
+
+      if (!isMine) {
+        void fetchNotifications(token);
+      }
+
+      if (isActive) {
+        void markConversationAsRead(message.conversationId);
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+      setConversationSocketConnected(false);
+    };
+  }, [fetchConversations, fetchNotifications, markConversationAsRead, token]);
+
+  useEffect(() => {
+    if (!token || currentView !== "conversations") return undefined;
+
+    const intervalId = window.setInterval(async () => {
+      if (
+        document.visibilityState === "hidden" ||
+        conversationsPollInFlightRef.current
+      ) {
+        return;
+      }
+
+      conversationsPollInFlightRef.current = true;
+      try {
+        await fetchConversations(token, { silent: true });
+      } finally {
+        conversationsPollInFlightRef.current = false;
+      }
+    }, CONVERSATION_LIST_POLL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentView, fetchConversations, token]);
+
+  useEffect(() => {
+    if (!token || currentView !== "conversations" || !activeConversationId) {
+      return;
+    }
+
+    const state = conversationMessagesById[activeConversationId];
+    if (!state?.items?.length && !state?.loading) {
+      void loadConversationMessages(activeConversationId);
+    }
+  }, [
+    activeConversationId,
+    conversationMessagesById,
+    currentView,
+    loadConversationMessages,
+    token,
+  ]);
+
+  useEffect(() => {
+    if (!token || currentView !== "conversations" || !activeConversationId) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(async () => {
+      if (
+        document.visibilityState === "hidden" ||
+        activeMessagesPollInFlightRef.current
+      ) {
+        return;
+      }
+
+      activeMessagesPollInFlightRef.current = true;
+      try {
+        const refreshed = await loadConversationMessages(activeConversationId, {
+          mergeLatest: true,
+          silent: true,
+        });
+
+        if (refreshed) {
+          await markConversationAsRead(activeConversationId);
+        }
+      } finally {
+        activeMessagesPollInFlightRef.current = false;
+      }
+    }, ACTIVE_CONVERSATION_POLL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [
+    activeConversationId,
+    currentView,
+    loadConversationMessages,
+    markConversationAsRead,
+    token,
+  ]);
 
   // Quando existe token, busca os dados do usuario autenticado.
   useEffect(() => {
@@ -854,8 +1331,6 @@ function App() {
       setComposerError("Faça login para curtir posts.");
       return;
     }
-
-    const method = isCurrentlyLiked ? "DELETE" : "POST";
 
     // Atualiza a interface antes da resposta do servidor.
     setPosts((prev) =>
@@ -876,30 +1351,26 @@ function App() {
 
     try {
       // Sincroniza a curtida real com o backend.
-      const res = await fetch(`${API_BASE}/posts/${postId}/like`, {
-        method,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
+      const result = await togglePostLike(postId, token, isCurrentlyLiked);
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
           setComposerError("Sua sessão expirou. Faça login novamente.");
           return;
         }
-        throw new Error(data?.message ?? "Erro ao curtir post.");
+        throw new Error(result.data?.message ?? "Erro ao curtir post.");
       }
 
       setPosts((prev) =>
         prev.map((post) => {
           if (post.id !== postId) return post;
           const likesCount = Number(
-            data?.likesCount ?? post.counts?.likes ?? 0,
+            result.data?.likesCount ?? post.counts?.likes ?? 0,
           );
           return {
             ...post,
-            liked: Boolean(data?.viewerLiked),
+            liked: Boolean(result.data?.viewerLiked),
             counts: { ...(post.counts ?? {}), likes: likesCount },
             stats: { ...post.stats, likes: formatCount(likesCount) },
           };
@@ -953,19 +1424,20 @@ function App() {
     );
 
     try {
-      const res = await fetch(`${API_BASE}/posts/${postId}/view`, {
-        method: "POST",
-      });
-      const data = await res.json().catch(() => ({}));
+      const result = await registerPostView(postId);
 
-      if (!res.ok) {
-        throw new Error(data?.message ?? "Erro ao registrar visualização.");
+      if (!result.ok) {
+        throw new Error(
+          result.data?.message ?? "Erro ao registrar visualização.",
+        );
       }
 
       setPosts((prev) =>
         prev.map((post) => {
           if (post.id !== postId) return post;
-          const viewCount = Number(data?.viewCount ?? post.counts?.views ?? 0);
+          const viewCount = Number(
+            result.data?.viewCount ?? post.counts?.views ?? 0,
+          );
           return {
             ...post,
             counts: { ...(post.counts ?? {}), views: viewCount },
@@ -991,6 +1463,146 @@ function App() {
       );
     }
   }, []);
+
+  const handleDeletePost = async (postId) => {
+    if (!postId) return;
+
+    const post = posts.find((item) => item.id === postId);
+    if (!post) return;
+
+    if (!token) {
+      setComposerError("Faça login para apagar posts.");
+      return;
+    }
+
+    if (post.authorId !== me?.id) {
+      setComposerError("Você só pode apagar seus próprios posts.");
+      return;
+    }
+
+    const confirmed = window.confirm("Apagar este post?");
+    if (!confirmed) return;
+
+    const previousPosts = posts;
+    const previousCommentsByPost = commentsByPost;
+
+    setPosts((prev) => prev.filter((item) => item.id !== postId));
+    setActiveCommentsPostId((current) => (current === postId ? "" : current));
+    setCommentsByPost((prev) => {
+      const next = { ...prev };
+      delete next[postId];
+      return next;
+    });
+    setComposerError("");
+
+    try {
+      const result = await deletePostApi(postId, token);
+
+      if (!result.ok) {
+        if (result.status === 401) {
+          setToken("");
+          throw new Error("Sua sessão expirou. Faça login novamente.");
+        }
+
+        throw new Error(
+          result.data?.message ?? "Não foi possível apagar o post.",
+        );
+      }
+    } catch (error) {
+      setPosts(previousPosts);
+      setCommentsByPost(previousCommentsByPost);
+      setComposerError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível apagar o post.",
+      );
+    }
+  };
+
+  const openReportDialog = (postId) => {
+    if (!postId) return;
+
+    const post = posts.find((item) => item.id === postId);
+    if (!post) return;
+
+    if (!token) {
+      setComposerError("Faça login para denunciar posts.");
+      return;
+    }
+
+    if (post.authorId === me?.id) {
+      setComposerError("Você não pode denunciar seu próprio post.");
+      return;
+    }
+
+    setReportDialog({
+      postId,
+      selectedReason: REPORT_REASONS[0].value,
+      loading: false,
+      error: "",
+    });
+    setComposerError("");
+  };
+
+  const closeReportDialog = () => {
+    if (reportDialog.loading) return;
+    setReportDialog({
+      postId: "",
+      selectedReason: REPORT_REASONS[0].value,
+      loading: false,
+      error: "",
+    });
+  };
+
+  const selectReportReason = (reason) => {
+    setReportDialog((prev) => ({
+      ...prev,
+      selectedReason: reason,
+      error: "",
+    }));
+  };
+
+  const submitReportPost = async () => {
+    const postId = reportDialog.postId;
+    if (!postId || reportDialog.loading) return;
+
+    const reason = reportDialog.selectedReason || REPORT_REASONS[0].value;
+
+    setReportDialog((prev) => ({ ...prev, loading: true, error: "" }));
+    setComposerNotice("");
+
+    try {
+      const result = await reportPostApi(postId, token, reason);
+
+      if (!result.ok) {
+        if (result.status === 401) {
+          setToken("");
+          throw new Error("Sua sessão expirou. Faça login novamente.");
+        }
+
+        throw new Error(
+          result.data?.message ?? "Não foi possível denunciar o post.",
+        );
+      }
+
+      setComposerNotice("Denúncia enviada para revisão.");
+      setReportDialog({
+        postId: "",
+        selectedReason: REPORT_REASONS[0].value,
+        loading: false,
+        error: "",
+      });
+    } catch (error) {
+      setReportDialog((prev) => ({
+        ...prev,
+        loading: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível denunciar o post.",
+      }));
+    }
+  };
 
   const setPostCommentsCount = useCallback((postId, commentsCount) => {
     const nextCount = Math.max(0, Number(commentsCount ?? 0));
@@ -1092,17 +1704,15 @@ function App() {
         });
         if (cursor) params.set("cursor", cursor);
 
-        const res = await fetch(
-          `${API_BASE}/posts/${postId}/comments?${params.toString()}`,
-        );
-        const data = await res.json().catch(() => ({}));
+        const result = await fetchPostComments(postId, params);
 
-        if (!res.ok) {
+        if (!result.ok) {
           throw new Error(
-            data?.message ?? "Não foi possível carregar os comentários.",
+            result.data?.message ?? "Não foi possível carregar os comentários.",
           );
         }
 
+        const data = result.data;
         const rawItems = Array.isArray(data) ? data : data?.items;
         const items = Array.isArray(rawItems)
           ? rawItems.map(mapApiComment)
@@ -1253,17 +1863,15 @@ function App() {
         });
         if (cursor) params.set("cursor", cursor);
 
-        const res = await fetch(
-          `${API_BASE}/posts/${postId}/comments?${params.toString()}`,
-        );
-        const data = await res.json().catch(() => ({}));
+        const result = await fetchPostComments(postId, params);
 
-        if (!res.ok) {
+        if (!result.ok) {
           throw new Error(
-            data?.message ?? "Não foi possível carregar as respostas.",
+            result.data?.message ?? "Não foi possível carregar as respostas.",
           );
         }
 
+        const data = result.data;
         const rawItems = Array.isArray(data) ? data : data?.items;
         const items = Array.isArray(rawItems)
           ? rawItems.map(mapApiComment)
@@ -1482,28 +2090,21 @@ function App() {
     setPostCommentsCount(postId, previousCount + 1);
 
     try {
-      const res = await fetch(`${API_BASE}/posts/${postId}/comments`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          content: text,
-          ...(parentCommentId ? { parentCommentId } : {}),
-        }),
+      const result = await createPostComment(postId, token, {
+        content: text,
+        ...(parentCommentId ? { parentCommentId } : {}),
       });
-      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
           throw new Error("Sua sessão expirou. Faça login novamente.");
         }
 
-        throw new Error(data?.message ?? "Não foi possível comentar.");
+        throw new Error(result.data?.message ?? "Não foi possível comentar.");
       }
 
+      const data = result.data;
       const created = data?.comment ? mapApiComment(data.comment) : null;
       const commentsCount = Number(
         data?.commentsCount ?? (current.items?.length ?? 0) + 1,
@@ -1616,25 +2217,21 @@ function App() {
     });
 
     try {
-      const res = await fetch(`${API_BASE}/comments/${commentId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
+      const result = await deleteComment(commentId, token);
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
           throw new Error("Sua sessão expirou. Faça login novamente.");
         }
 
         throw new Error(
-          data?.message ?? "Não foi possível apagar o comentário.",
+          result.data?.message ?? "Não foi possível apagar o comentário.",
         );
       }
 
       const commentsCount = Number(
-        data?.commentsCount ?? Math.max(0, previousCount - 1),
+        result.data?.commentsCount ?? Math.max(0, previousCount - 1),
       );
 
       setCommentsByPost((prev) => {
@@ -1766,20 +2363,17 @@ function App() {
         authMode === "login"
           ? { email: email.trim(), password }
           : registerPayload;
-      const res = await fetch(`${API_BASE}/auth/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
+      const result = await authenticate(endpoint, payload);
 
-      if (!res.ok) {
-        setAuthError(data?.message ?? "Falha na autenticação.");
+      if (!result.ok) {
+        setAuthError(result.data?.message ?? "Falha na autenticação.");
         return;
       }
 
+      const data = result.data;
       setToken(data?.access_token ?? "");
       setMe(data?.user ?? null);
+      setFeedMode("for-you");
       setPassword("");
       setConfirmPassword("");
       setRegisterProfile(REGISTER_PROFILE_INITIAL);
@@ -1787,7 +2381,7 @@ function App() {
       setProfileError("");
       setAuthMode("login");
       setCurrentView("home");
-      await fetchPosts(data?.access_token ?? "");
+      await fetchPosts(data?.access_token ?? "", "for-you");
     } catch {
       setAuthError("Não foi possível conectar ao backend.");
     } finally {
@@ -1808,13 +2402,8 @@ function App() {
 
     // Pequena funcao auxiliar para evitar repetir a mesma chamada de autenticacao.
     const tryAuth = async (endpoint) => {
-      const res = await fetch(`${API_BASE}/auth/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(DEV_ACCOUNT),
-      });
-      const data = await res.json().catch(() => ({}));
-      return { res, data };
+      const result = await authenticate(endpoint, DEV_ACCOUNT);
+      return { res: result, data: result.data };
     };
 
     try {
@@ -1854,12 +2443,13 @@ function App() {
 
       setToken(data?.access_token ?? "");
       setMe(data?.user ?? null);
+      setFeedMode("for-you");
       setConfirmPassword("");
       setSelectedProfile(null);
       setProfileError("");
       setAuthMode("login");
       setCurrentView("home");
-      await fetchPosts(data?.access_token ?? "");
+      await fetchPosts(data?.access_token ?? "", "for-you");
     } catch {
       setAuthError("Não foi possível conectar ao backend para o login Dev.");
     } finally {
@@ -1876,15 +2466,27 @@ function App() {
     setRegisterProfile(REGISTER_PROFILE_INITIAL);
     setUserMenuOpen(false);
     setContent("");
+    imageUploadIdRef.current += 1;
+    setComposerImage(null);
+    setImageUploadLoading(false);
     setComposerError("");
     setComposerNotice("");
     setSelectedProfile(null);
     setProfileError("");
     setActiveCommentsPostId("");
     setCommentsByPost({});
+    setLiveTrends([]);
+    setFollowSuggestions([]);
+    setFollowActionUserId("");
     setNotifications([]);
     setNotificationsError("");
     setNotificationsNotice("");
+    setConversations([]);
+    setConversationsError("");
+    setActiveConversationId("");
+    setConversationMessagesById({});
+    setConversationStarting(false);
+    setFeedMode("for-you");
     setCurrentView("home");
   };
 
@@ -1904,11 +2506,124 @@ function App() {
     setUserMenuOpen(false);
   };
 
+  const handleFeedModeChange = (mode) => {
+    const nextMode = mode === "following" && token ? "following" : "for-you";
+    setFeedMode(nextMode);
+    setActiveCommentsPostId("");
+    setCommentsByPost({});
+    if (mode === "following" && !token) {
+      setFeedError("Faça login para ver posts das contas que você segue.");
+    }
+  };
+
   const openExplore = () => {
     setSelectedProfile(null);
     setProfileError("");
     setCurrentView("explore");
     setUserMenuOpen(false);
+  };
+
+  const openTrend = (trend) => {
+    const query = String(trend?.title ?? "").replace(/^#/, "");
+    setSelectedProfile(null);
+    setProfileError("");
+    setExploreQuery(query);
+    setExploreFilter("all");
+    setCurrentView("explore");
+    setUserMenuOpen(false);
+  };
+
+  const openSuggestedProfile = (person) => {
+    if (!person?.id) return;
+
+    openUserProfile({
+      authorId: person.id,
+      authorEmail: person.user?.email,
+      name: person.name,
+      handle: person.handle,
+      authorRole: person.badge,
+      createdAt: person.user?.createdAt,
+    });
+  };
+
+  const handleToggleFollow = async (person) => {
+    if (!person?.id || followActionUserId) return;
+
+    if (!token) {
+      setComposerError("Faça login para seguir pessoas.");
+      return;
+    }
+
+    setFollowActionUserId(person.id);
+    setFollowSuggestions((prev) =>
+      prev.map((item) =>
+        item.id === person.id
+          ? {
+              ...item,
+              following: !item.following,
+              followersCount: Math.max(
+                0,
+                Number(item.followersCount ?? 0) + (item.following ? -1 : 1),
+              ),
+            }
+          : item,
+      ),
+    );
+
+    try {
+      const result = await toggleUserFollowApi(
+        token,
+        person.id,
+        person.following,
+      );
+
+      if (!result.ok) {
+        if (result.status === 401) {
+          setToken("");
+          throw new Error("Sua sessão expirou. Faça login novamente.");
+        }
+
+        throw new Error(
+          result.data?.message ?? "Não foi possível atualizar esta relação.",
+        );
+      }
+
+      setFollowSuggestions((prev) =>
+        prev.map((item) =>
+          item.id === person.id
+            ? {
+                ...item,
+                following: Boolean(result.data?.viewerFollowing),
+                followersCount: Number(
+                  result.data?.followersCount ?? item.followersCount ?? 0,
+                ),
+              }
+            : item,
+        ),
+      );
+      if (feedMode === "following") {
+        void fetchPosts(token, "following");
+      }
+    } catch (error) {
+      setFollowSuggestions((prev) =>
+        prev.map((item) =>
+          item.id === person.id
+            ? {
+                ...item,
+                following: person.following,
+                followersCount: person.followersCount,
+              }
+            : item,
+        ),
+      );
+      setComposerError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível atualizar esta relação.",
+      );
+    } finally {
+      setFollowActionUserId("");
+    }
   };
 
   const openAlerts = () => {
@@ -1925,12 +2640,20 @@ function App() {
     setProfileError("");
     setCurrentView("conversations");
     setUserMenuOpen(false);
+    void fetchConversations();
   };
 
   const openSettings = () => {
     setSelectedProfile(null);
     setProfileError("");
     setCurrentView("settings");
+    setUserMenuOpen(false);
+  };
+
+  const openPlus = () => {
+    setSelectedProfile(null);
+    setProfileError("");
+    setCurrentView("plus");
     setUserMenuOpen(false);
   };
 
@@ -1949,6 +2672,182 @@ function App() {
     }
   };
 
+  const handleSelectConversation = async (conversationId) => {
+    if (!conversationId) return;
+
+    setActiveConversationId(conversationId);
+    const state = conversationMessagesById[conversationId];
+    if (!state?.items?.length && !state?.loading) {
+      void loadConversationMessages(conversationId);
+    }
+
+    void markConversationAsRead(conversationId);
+  };
+
+  const handleConversationDraftChange = (conversationId, draft) => {
+    if (!conversationId) return;
+    const safeDraft = String(draft ?? "").slice(0, 1000);
+
+    setConversationMessagesById((prev) => {
+      const existing = prev[conversationId] ?? {};
+      return {
+        ...prev,
+        [conversationId]: {
+          ...existing,
+          items: existing.items ?? [],
+          draft: safeDraft,
+          hasMore: Boolean(existing.hasMore),
+          nextCursor: existing.nextCursor ?? null,
+          loading: Boolean(existing.loading),
+          loadingMore: Boolean(existing.loadingMore),
+          sending: Boolean(existing.sending),
+          error: "",
+        },
+      };
+    });
+  };
+
+  const handleSendConversationMessage = async (conversationId) => {
+    if (!token || !conversationId) return;
+
+    const current = conversationMessagesById[conversationId] ?? {};
+    const text = String(current.draft ?? "").trim();
+    if (!text || current.sending) return;
+
+    setConversationMessagesById((prev) => {
+      const existing = prev[conversationId] ?? {};
+      return {
+        ...prev,
+        [conversationId]: {
+          ...existing,
+          items: existing.items ?? [],
+          draft: existing.draft ?? "",
+          sending: true,
+          error: "",
+        },
+      };
+    });
+
+    try {
+      const result = await sendConversationMessageApi(
+        token,
+        conversationId,
+        text,
+      );
+
+      if (!result.ok) {
+        if (result.status === 401) {
+          setToken("");
+          throw new Error("Sua sessão expirou. Faça login novamente.");
+        }
+
+        throw new Error(
+          result.data?.message ?? "Não foi possível enviar a mensagem.",
+        );
+      }
+
+      const message = mapApiMessage(result.data);
+      setConversationMessagesById((prev) => {
+        const existing = prev[conversationId] ?? {};
+        return {
+          ...prev,
+          [conversationId]: {
+            ...existing,
+            items: [...(existing.items ?? []), message],
+            draft: "",
+            sending: false,
+            error: "",
+          },
+        };
+      });
+      setConversations((prev) =>
+        prev
+          .map((conversation) =>
+            conversation.id === conversationId
+              ? {
+                  ...conversation,
+                  lastMessage: message,
+                  preview: message.text,
+                  time: message.time,
+                  updatedAt: message.createdAt,
+                  unreadCount: 0,
+                }
+              : conversation,
+          )
+          .sort((left, right) =>
+            String(right.updatedAt).localeCompare(String(left.updatedAt)),
+          ),
+      );
+    } catch (error) {
+      setConversationMessagesById((prev) => {
+        const existing = prev[conversationId] ?? {};
+        return {
+          ...prev,
+          [conversationId]: {
+            ...existing,
+            items: existing.items ?? [],
+            draft: existing.draft ?? text,
+            sending: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Não foi possível enviar a mensagem.",
+          },
+        };
+      });
+    }
+  };
+
+  const handleStartConversation = async (participantId) => {
+    if (!participantId || conversationStarting) return;
+
+    if (!token) {
+      setProfileError("Faça login para enviar mensagem.");
+      return;
+    }
+
+    setConversationStarting(true);
+    setProfileError("");
+    setConversationsError("");
+
+    try {
+      const result = await createConversationApi(token, participantId);
+
+      if (!result.ok) {
+        if (result.status === 401) {
+          setToken("");
+          throw new Error("Sua sessão expirou. Faça login novamente.");
+        }
+
+        throw new Error(
+          result.data?.message ?? "Não foi possível iniciar a conversa.",
+        );
+      }
+
+      const conversation = mapApiConversation(result.data);
+      setConversations((prev) => {
+        const withoutCurrent = prev.filter(
+          (item) => item.id !== conversation.id,
+        );
+        return [conversation, ...withoutCurrent];
+      });
+      setActiveConversationId(conversation.id);
+      setSelectedProfile(null);
+      setProfileError("");
+      setCurrentView("conversations");
+      void loadConversationMessages(conversation.id);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Não foi possível iniciar a conversa.";
+      setProfileError(message);
+      setConversationsError(message);
+    } finally {
+      setConversationStarting(false);
+    }
+  };
+
   const handleUseComposerPrompt = (prompt) => {
     setSelectedProfile(null);
     setProfileError("");
@@ -1959,6 +2858,12 @@ function App() {
     window.requestAnimationFrame(() => composerInputRef.current?.focus());
   };
 
+  const handleComposerContentChange = (value) => {
+    setContent(value);
+    if (composerError) setComposerError("");
+    if (composerNotice) setComposerNotice("");
+  };
+
   const handleMarkNotificationRead = async (notificationId, quiet = false) => {
     if (!token || !notificationId) return;
 
@@ -1966,38 +2871,31 @@ function App() {
     if (!quiet) setNotificationsNotice("");
 
     try {
-      const res = await fetch(
-        `${API_BASE}/notifications/${notificationId}/read`,
-        {
-          method: "PATCH",
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-      const data = await res.json().catch(() => ({}));
+      const result = await markNotificationRead(notificationId, token);
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
           throw new Error("Sua sessão expirou. Faça login novamente.");
         }
 
         throw new Error(
-          data?.message ?? "Não foi possível atualizar o alerta.",
+          result.data?.message ?? "Não foi possível atualizar a notificação.",
         );
       }
 
-      const updated = mapApiNotification(data);
+      const updated = mapApiNotification(result.data);
       setNotifications((prev) =>
         prev.map((notification) =>
           notification.id === notificationId ? updated : notification,
         ),
       );
-      if (!quiet) setNotificationsNotice("Alerta marcado como lido.");
+      if (!quiet) setNotificationsNotice("Notificação marcada como lida.");
     } catch (error) {
       setNotificationsError(
         error instanceof Error
           ? error.message
-          : "Não foi possível atualizar o alerta.",
+          : "Não foi possível atualizar a notificação.",
       );
     }
   };
@@ -2009,20 +2907,16 @@ function App() {
     setNotificationsNotice("");
 
     try {
-      const res = await fetch(`${API_BASE}/notifications/read-all`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
+      const result = await markAllNotificationsRead(token);
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
           throw new Error("Sua sessão expirou. Faça login novamente.");
         }
 
         throw new Error(
-          data?.message ?? "Não foi possível atualizar os alertas.",
+          result.data?.message ?? "Não foi possível atualizar as notificações.",
         );
       }
 
@@ -2033,12 +2927,14 @@ function App() {
           readAt: notification.readAt ?? readAt,
         })),
       );
-      setNotificationsNotice("Todos os alertas foram marcados como lidos.");
+      setNotificationsNotice(
+        "Todas as notificações foram marcadas como lidas.",
+      );
     } catch (error) {
       setNotificationsError(
         error instanceof Error
           ? error.message
-          : "Não foi possível atualizar os alertas.",
+          : "Não foi possível atualizar as notificações.",
       );
     }
   };
@@ -2055,6 +2951,31 @@ function App() {
     if (!current?.loaded && !current?.loading) {
       void loadCommentsForPost(notification.postId);
     }
+
+    if (!notification.readAt) {
+      void handleMarkNotificationRead(notification.id, true);
+    }
+  };
+
+  const handleOpenNotificationConversation = async (notification) => {
+    if (!notification?.conversationId) return;
+
+    setSelectedProfile(null);
+    setProfileError("");
+    setCurrentView("conversations");
+    setActiveConversationId(notification.conversationId);
+    setUserMenuOpen(false);
+
+    if (
+      !conversations.some(
+        (conversation) => conversation.id === notification.conversationId,
+      )
+    ) {
+      await fetchConversations(token, { silent: true });
+    }
+
+    void loadConversationMessages(notification.conversationId);
+    void markConversationAsRead(notification.conversationId);
 
     if (!notification.readAt) {
       void handleMarkNotificationRead(notification.id, true);
@@ -2084,12 +3005,11 @@ function App() {
     setProfileError("");
 
     try {
-      const res = await fetch(`${API_BASE}/users/${authorId}`);
-      const data = await res.json().catch(() => ({}));
+      const result = await fetchUser(authorId);
 
-      if (!res.ok) {
+      if (!result.ok) {
         setProfileError(
-          data?.message ?? "Não foi possível carregar este perfil.",
+          result.data?.message ?? "Não foi possível carregar este perfil.",
         );
         setSelectedProfile({
           id: authorId,
@@ -2102,7 +3022,7 @@ function App() {
         return;
       }
 
-      setSelectedProfile(data?.user ?? null);
+      setSelectedProfile(result.data?.user ?? null);
     } catch {
       setProfileError(
         "Backend indisponível. Não foi possível carregar este perfil.",
@@ -2144,6 +3064,131 @@ function App() {
     }));
   };
 
+  const handleChooseComposerImage = () => {
+    composerImageInputRef.current?.click();
+  };
+
+  const handleRemoveComposerImage = () => {
+    imageUploadIdRef.current += 1;
+    setImageUploadLoading(false);
+    setComposerImage(null);
+    setComposerError("");
+    setComposerNotice("");
+  };
+
+  const handleComposerImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!token) {
+      setComposerError("Faça login para anexar imagem.");
+      setComposerNotice("");
+      return;
+    }
+
+    const validationError = getPostImageValidationError(file);
+    if (validationError) {
+      setComposerError(validationError);
+      setComposerNotice("");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    const uploadId = imageUploadIdRef.current + 1;
+    imageUploadIdRef.current = uploadId;
+
+    setComposerImage({
+      previewUrl,
+      imageUrl: "",
+      fileName: file.name,
+      size: file.size,
+    });
+    setImageUploadLoading(true);
+    setComposerError("");
+    setComposerNotice("");
+
+    try {
+      const result = await uploadImage(token, file);
+
+      if (uploadId !== imageUploadIdRef.current) {
+        return;
+      }
+
+      if (!result.ok) {
+        if (result.status === 401) {
+          setToken("");
+          setComposerImage(null);
+          setComposerError("Sua sessão expirou. Faça login novamente.");
+          return;
+        }
+
+        const message = Array.isArray(result.data?.message)
+          ? result.data.message.join(" ")
+          : result.data?.message;
+        setComposerImage(null);
+        setComposerError(message ?? "Não foi possível anexar a imagem.");
+        return;
+      }
+
+      const data = result.data;
+      if (typeof data?.imageUrl !== "string") {
+        setComposerImage(null);
+        setComposerError("O upload não retornou uma imagem válida.");
+        return;
+      }
+
+      setComposerImage((prev) =>
+        prev?.previewUrl === previewUrl
+          ? { ...prev, imageUrl: data.imageUrl, path: data.path ?? "" }
+          : prev,
+      );
+      setComposerNotice("Imagem anexada.");
+    } catch {
+      if (uploadId === imageUploadIdRef.current) {
+        setComposerImage(null);
+        setComposerError("Backend indisponível. Não foi possível anexar.");
+      }
+    } finally {
+      if (uploadId === imageUploadIdRef.current) {
+        setImageUploadLoading(false);
+      }
+    }
+  };
+
+  const handleActivateEurecaPlus = async (plan) => {
+    if (!token) {
+      return {
+        ok: false,
+        data: { message: "Faça login para ativar o EURECA+." },
+      };
+    }
+
+    const result = await activateEurecaPlus(token, plan);
+    if (result.ok && result.data?.user) {
+      setMe(result.data.user);
+    }
+    return result;
+  };
+
+  const handleCancelEurecaPlus = async () => {
+    if (!token) {
+      return {
+        ok: false,
+        data: { message: "Faça login para gerir o EURECA+." },
+      };
+    }
+
+    const result = await cancelEurecaPlus(token);
+    if (result.ok && result.data?.user) {
+      setMe(result.data.user);
+    }
+    return result;
+  };
+
   // Publica um novo post no backend e adiciona o resultado ao topo do feed.
   const handleCreatePost = async () => {
     const text = content.trim();
@@ -2159,35 +3204,45 @@ function App() {
       return;
     }
 
+    if (imageUploadLoading || (composerImage && !composerImage.imageUrl)) {
+      setComposerError("Aguarde o envio da imagem antes de postar.");
+      setComposerNotice("");
+      return;
+    }
+
     setCreateLoading(true);
     setComposerError("");
     setComposerNotice("");
 
     try {
-      // Envia apenas o conteudo digitado. O autor vem do token.
-      const res = await fetch(`${API_BASE}/posts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ content: text }),
+      // O autor vem do token; a imagem ja foi enviada e entra como URL.
+      const result = await createPost(token, {
+        content: text,
+        ...(composerImage?.imageUrl
+          ? { imageUrl: composerImage.imageUrl }
+          : {}),
       });
-      const data = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
-        if (res.status === 401) {
+      if (!result.ok) {
+        if (result.status === 401) {
           setToken("");
           setComposerError("Sua sessão expirou. Faça login novamente.");
           return;
         }
 
-        setComposerError(data?.message ?? "Não foi possível publicar o post.");
+        setComposerError(
+          result.data?.message ?? "Não foi possível publicar o post.",
+        );
         return;
       }
 
-      setPosts((prev) => [mapApiPost(data), ...prev]);
+      if (feedMode === "following") {
+        await fetchPosts(token, "following");
+      } else {
+        setPosts((prev) => [mapApiPost(result.data), ...prev]);
+      }
       setContent("");
+      setComposerImage(null);
       setComposerNotice("Post publicado.");
     } catch {
       setComposerError("Backend indisponível. Não foi possível publicar.");
@@ -2230,92 +3285,24 @@ function App() {
   return (
     <div className="eureca-app" data-theme={resolvedTheme}>
       <div className="eureca-shell">
-        {/* Barra superior com marca, navegacao principal e menu da conta. */}
-        <header className="eureca-topbar">
-          <div className="brand">
-            <div className="brand-mark">
-              <WaveMark />
-            </div>
-            <span className="brand-name">Eureca</span>
-          </div>
-
-          {/* Os itens de navegacao sao montados a partir de uma lista fixa. */}
-          <nav className="main-nav" aria-label="Navegação principal">
-            {navItems.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                className={`nav-item ${item.view && currentView === item.view ? "is-active" : ""}`}
-                onClick={() => {
-                  if (item.view === "profile") openProfile();
-                  if (item.view === "home") openHome();
-                  if (item.view === "explore") openExplore();
-                  if (item.view === "alerts") openAlerts();
-                  if (item.view === "conversations") openConversations();
-                  if (item.view === "settings") openSettings();
-                }}
-              >
-                <Icon name={item.icon} />
-                <span>{item.label}</span>
-                {item.view === "alerts" && unreadNotificationsCount > 0 ? (
-                  <strong className="nav-badge">
-                    {formatCount(unreadNotificationsCount)}
-                  </strong>
-                ) : null}
-              </button>
-            ))}
-          </nav>
-
-          {/* Menu da conta com acoes de perfil e logout. */}
-          <div className="topbar-actions">
-            <button
-              type="button"
-              className="new-wave-btn"
-              title="Assinatura premium (visual)"
-            >
-              Eureca+
-            </button>
-            <div className="user-menu" ref={userMenuRef}>
-              <button
-                type="button"
-                className="user-chip"
-                aria-label="Abrir menu do perfil"
-                aria-expanded={userMenuOpen}
-                onClick={() => setUserMenuOpen((prev) => !prev)}
-              >
-                {userInitial}
-              </button>
-
-              {userMenuOpen ? (
-                <div className="user-dropdown" role="menu">
-                  <div className="user-dropdown-head">
-                    <span className="user-dropdown-initial">{userInitial}</span>
-                    <div>
-                      <strong>{sessionName}</strong>
-                      <small>{sessionHandle}</small>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="user-dropdown-item"
-                    role="menuitem"
-                    onClick={openProfile}
-                  >
-                    Perfil
-                  </button>
-                  <button
-                    type="button"
-                    className="user-dropdown-item danger"
-                    role="menuitem"
-                    onClick={handleLogout}
-                  >
-                    Logout
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </header>
+        <AppTopbar
+          currentView={currentView}
+          unreadNotificationsCount={unreadNotificationsCount}
+          userInitial={userInitial}
+          userMenuOpen={userMenuOpen}
+          userMenuRef={userMenuRef}
+          sessionName={sessionName}
+          sessionHandle={sessionHandle}
+          onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
+          onOpenProfile={openProfile}
+          onOpenHome={openHome}
+          onOpenExplore={openExplore}
+          onOpenAlerts={openAlerts}
+          onOpenConversations={openConversations}
+          onOpenSettings={openSettings}
+          onOpenPlus={openPlus}
+          onLogout={handleLogout}
+        />
 
         <main className="eureca-layout">
           {/* Coluna lateral com resumo do usuario, tendencias e sugestoes. */}
@@ -2323,991 +3310,244 @@ function App() {
             latestMyPost={latestMyPost}
             latestMyPostPreview={latestMyPostPreview}
             me={me}
-            trends={trends}
-            suggestions={suggestions}
+            trends={resolvedTrends}
+            suggestions={resolvedFollowSuggestions}
+            followActionUserId={followActionUserId}
             onNewPost={openHome}
+            onTrendClick={openTrend}
+            onSuggestionClick={openSuggestedProfile}
+            onToggleFollow={handleToggleFollow}
           />
 
           <section className="feed-column">
             {/* A coluna principal troca de conteudo conforme a "view" selecionada. */}
             {currentView === "profile" ? (
-              <>
-                {/* Tela de perfil: mostra dados basicos da conta e lista de posts do usuario. */}
-                <div className="feed-head">
-                  <h1>{isOwnProfile ? "Perfil" : "Perfil público"}</h1>
-                </div>
-
-                <section className="panel profile-page-card">
-                  <div className="profile-cover" aria-hidden="true" />
-                  <div className="profile-page-hero">
-                    <div className="profile-page-avatar">
-                      {profileInitial}
-                      <span
-                        className="profile-presence-dot"
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <div className="profile-page-meta">
-                      <div className="profile-social-row">
-                        <span className="profile-role-pill">
-                          {profileUser?.role ?? "Membro da comunidade"}
-                        </span>
-                        <span className="profile-presence-pill">
-                          {isOwnProfile ? "Online agora" : "Membro ativo"}
-                        </span>
-                      </div>
-                      <h2>{profileName}</h2>
-                      <p>{profileHandle}</p>
-                      <div className="profile-meta-grid">
-                        <span>
-                          {isOwnProfile ? profileEmail : "Perfil público"}
-                        </span>
-                        <span>Criada em {profileCreatedAt}</span>
-                        <span>
-                          {profileUser?.id
-                            ? `ID ${profileUser.id.slice(0, 8)}`
-                            : "Conta autenticada"}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="follow-btn profile-edit-btn"
-                      onClick={openHome}
-                    >
-                      Voltar ao feed
-                    </button>
-                  </div>
-
-                  <div className="profile-stats">
-                    <div className="profile-stat">
-                      <span>{profilePosts.length}</span>
-                      <small>Posts</small>
-                    </div>
-                    <div className="profile-stat">
-                      <span>{formatCount(totalProfileLikes)}</span>
-                      <small>Curtidas</small>
-                    </div>
-                    <div className="profile-stat">
-                      <span>{formatCount(totalProfileViews)}</span>
-                      <small>Views</small>
-                    </div>
-                  </div>
-
-                  <div className="profile-reputation">
-                    <div className="profile-reputation-main">
-                      <span className="profile-reputation-kicker">
-                        Reputação
-                      </span>
-                      <h3>{profileCommunityProgress.currentLevel.label}</h3>
-                      <p>{profileCommunityProgress.nextAction}</p>
-                      <div
-                        className="profile-level-track"
-                        aria-label={`Progresso de nível: ${profileCommunityProgress.levelProgress}%`}
-                      >
-                        <span
-                          style={{
-                            width: `${profileCommunityProgress.levelProgress}%`,
-                          }}
-                        />
-                      </div>
-                      <small>
-                        {profileCommunityProgress.nextLevel
-                          ? `${formatCount(profileCommunityProgress.remainingScore)} pontos até ${profileCommunityProgress.nextLevel.label}`
-                          : "Nível máximo desta etapa"}
-                      </small>
-                    </div>
-
-                    <div className="profile-score-stack">
-                      <div>
-                        <strong>
-                          {formatCount(profileCommunityProgress.score)}
-                        </strong>
-                        <span>score</span>
-                      </div>
-                      <div>
-                        <strong>
-                          {profileCommunityProgress.profileCompletion}%
-                        </strong>
-                        <span>perfil</span>
-                      </div>
-                    </div>
-
-                    <div className="achievement-list">
-                      {profileCommunityProgress.achievements.map(
-                        (achievement) => (
-                          <span
-                            key={achievement.label}
-                            className={
-                              achievement.unlocked ? "is-unlocked" : ""
-                            }
-                          >
-                            <strong>{achievement.label}</strong>
-                            <small>{achievement.meta}</small>
-                          </span>
-                        ),
-                      )}
-                    </div>
-                  </div>
-
-                  {profileLoading ? (
-                    <p className="profile-feedback">Carregando perfil...</p>
-                  ) : null}
-                  {profileError ? (
-                    <p className="profile-feedback is-error">{profileError}</p>
-                  ) : null}
-
-                  <div className="profile-bio panel">
-                    <div>
-                      <h3>Sobre</h3>
-                      <p>{profileBio}</p>
-                    </div>
-                    <div>
-                      <h3>Interesses</h3>
-                      {profileUser?.interests?.length ? (
-                        <div className="profile-interest-list">
-                          {profileUser.interests.map((interest) => (
-                            <span key={interest}>{interest}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p>Nenhum interesse adicionado ainda.</p>
-                      )}
-                    </div>
-                  </div>
-                </section>
-
-                <div className="section-title-row">
-                  <h3>
-                    {isOwnProfile ? "Seus posts" : `Posts de ${profileName}`}
-                  </h3>
-                  <button
-                    type="button"
-                    className="mini-link-btn"
-                    onClick={() => fetchPosts()}
-                  >
-                    Atualizar
-                  </button>
-                </div>
-
-                <div className="post-list">
-                  {postsLoading ? (
-                    <div className="panel post-card empty-state">
-                      Carregando posts...
-                    </div>
-                  ) : null}
-
-                  {!postsLoading && profilePosts.length === 0 ? (
-                    <div className="panel post-card empty-state">
-                      {isOwnProfile
-                        ? "Você ainda não publicou nada. Volte ao feed e faça seu primeiro post."
-                        : "Este usuário ainda não tem posts visíveis no feed carregado."}
-                    </div>
-                  ) : null}
-
-                  {profilePosts.map((post) => (
-                    <PostCard
-                      key={post.id ?? `${post.handle}-${post.time}`}
-                      post={post}
-                      onAuthorClick={openUserProfile}
-                    />
-                  ))}
-                </div>
-              </>
+              <ProfileView
+                isOwnProfile={isOwnProfile}
+                profileInitial={profileInitial}
+                profileUser={profileUser}
+                profileName={profileName}
+                profileHandle={profileHandle}
+                profileEmail={profileEmail}
+                profileCreatedAt={profileCreatedAt}
+                profileBio={profileBio}
+                profilePosts={profilePosts}
+                profileCommunityProgress={profileCommunityProgress}
+                totalProfileLikes={totalProfileLikes}
+                totalProfileViews={totalProfileViews}
+                profileSocial={profileSocial}
+                profileLoading={profileLoading}
+                profileError={profileError}
+                postsLoading={postsLoading}
+                onBackToFeed={openHome}
+                onRefreshPosts={() => fetchPosts()}
+                onAuthorClick={openUserProfile}
+                onStartConversation={handleStartConversation}
+                conversationStarting={conversationStarting}
+              />
             ) : currentView === "explore" ? (
-              <>
-                <div className="feed-head">
-                  <h1>Explorar</h1>
-                </div>
-
-                <section className="panel explore-hero">
-                  <div className="explore-hero-main">
-                    <span className="explore-kicker">Descoberta</span>
-                    <h2>
-                      {exploreQuery
-                        ? `Resultados para "${exploreQuery}"`
-                        : "Encontre conversas, tópicos e pessoas"}
-                    </h2>
-                    <p>
-                      {exploreData.totalMatches > 0
-                        ? `${formatCount(exploreData.totalMatches)} itens encontrados no feed atual.`
-                        : "Nenhum resultado encontrado no feed atual."}
-                    </p>
-                  </div>
-
-                  <div className="explore-search-panel">
-                    <label className="explore-search">
-                      <Icon name="compass" />
-                      <input
-                        type="search"
-                        value={exploreQuery}
-                        onChange={(event) =>
-                          setExploreQuery(event.target.value)
-                        }
-                        placeholder="Buscar posts, tópicos ou pessoas"
-                        aria-label="Buscar no Explorar"
-                      />
-                      {exploreQuery ? (
-                        <button
-                          type="button"
-                          onClick={() => setExploreQuery("")}
-                        >
-                          Limpar
-                        </button>
-                      ) : null}
-                    </label>
-
-                    <div
-                      className="explore-filter-row"
-                      aria-label="Filtros do Explorar"
-                    >
-                      {EXPLORE_FILTERS.map((filter) => (
-                        <button
-                          key={filter.value}
-                          type="button"
-                          className={
-                            exploreFilter === filter.value ? "is-active" : ""
-                          }
-                          aria-pressed={exploreFilter === filter.value}
-                          onClick={() => setExploreFilter(filter.value)}
-                        >
-                          {filter.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="explore-metrics">
-                    <div>
-                      <strong>{formatCount(exploreData.posts.length)}</strong>
-                      <span>posts</span>
-                    </div>
-                    <div>
-                      <strong>{formatCount(exploreData.topics.length)}</strong>
-                      <span>tópicos</span>
-                    </div>
-                    <div>
-                      <strong>{formatCount(exploreData.people.length)}</strong>
-                      <span>pessoas</span>
-                    </div>
-                  </div>
-                </section>
-
-                <div className="explore-grid">
-                  {exploreFilter !== "people" ? (
-                    <section className="panel explore-section-card is-wide">
-                      <div className="section-title-row">
-                        <h3>Posts em destaque</h3>
-                        <button
-                          type="button"
-                          className="mini-link-btn"
-                          onClick={() => fetchPosts()}
-                        >
-                          Atualizar
-                        </button>
-                      </div>
-
-                      <div className="explore-post-list">
-                        {postsLoading ? (
-                          <div className="explore-empty">
-                            Carregando posts...
-                          </div>
-                        ) : null}
-
-                        {!postsLoading && exploreData.posts.length === 0 ? (
-                          <div className="explore-empty">
-                            Nenhum post encontrado.
-                          </div>
-                        ) : null}
-
-                        {exploreData.posts.slice(0, 8).map((post, index) => (
-                          <button
-                            key={post.id ?? `${post.handle}-${post.createdAt}`}
-                            type="button"
-                            className="explore-post-item"
-                            onClick={() => openPostDiscussion(post.id)}
-                          >
-                            <span className="explore-post-rank">
-                              {index + 1}
-                            </span>
-                            <div className="explore-post-body">
-                              <div className="explore-post-line">
-                                <strong>{post.name}</strong>
-                                <span>{post.handle}</span>
-                                {post.authorBadge ? (
-                                  <em>{post.authorBadge.label}</em>
-                                ) : null}
-                              </div>
-                              <p>{truncateText(post.text, 140)}</p>
-                              <div className="explore-post-stats">
-                                <span>
-                                  {formatCount(post.counts?.replies)}{" "}
-                                  comentários
-                                </span>
-                                <span>
-                                  {formatCount(post.counts?.likes)} curtidas
-                                </span>
-                                <span>
-                                  {formatCount(post.counts?.views)} views
-                                </span>
-                                <strong>{formatCount(post.score)} score</strong>
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
-
-                  <section className="panel explore-section-card">
-                    <div className="section-title-row">
-                      <h3>Tópicos</h3>
-                      <span className="explore-count-pill">
-                        {formatCount(exploreData.topics.length)}
-                      </span>
-                    </div>
-
-                    <div className="explore-topic-list">
-                      {exploreData.topics.length === 0 ? (
-                        <div className="explore-empty">
-                          Nenhum tópico encontrado.
-                        </div>
-                      ) : null}
-
-                      {exploreData.topics.map((trend, index) => (
-                        <button
-                          key={trend.title}
-                          type="button"
-                          className="explore-topic-item"
-                          onClick={() => {
-                            setExploreQuery(trend.title.replace(/^#/, ""));
-                            setExploreFilter("all");
-                          }}
-                        >
-                          <span>{index + 1}</span>
-                          <div>
-                            <strong>{trend.title}</strong>
-                            <small>{trend.category}</small>
-                          </div>
-                          <em>{trend.posts}</em>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="panel explore-section-card">
-                    <div className="section-title-row">
-                      <h3>Pessoas</h3>
-                      <span className="explore-count-pill">
-                        {formatCount(exploreData.people.length)}
-                      </span>
-                    </div>
-
-                    <div className="explore-people-list">
-                      {exploreData.people.length === 0 ? (
-                        <div className="explore-empty">
-                          Nenhuma pessoa encontrada.
-                        </div>
-                      ) : null}
-
-                      {exploreData.people.slice(0, 8).map((person) => (
-                        <div key={person.handle} className="explore-person">
-                          <div className="explore-person-avatar">
-                            {person.initials}
-                            <span
-                              className={`follow-status-dot is-${person.status}`}
-                              aria-hidden="true"
-                            />
-                          </div>
-                          <div className="explore-person-meta">
-                            <div className="follow-name-row">
-                              <strong>{person.name}</strong>
-                              <span className="follow-badge">
-                                {person.badge}
-                              </span>
-                            </div>
-                            <span>{person.handle}</span>
-                            <small>{person.context}</small>
-                          </div>
-                          <button
-                            type="button"
-                            className="mini-link-btn"
-                            onClick={() =>
-                              person.post ? openUserProfile(person.post) : null
-                            }
-                            disabled={!person.post}
-                          >
-                            {person.post ? "Ver perfil" : "Em breve"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              </>
+              <ExploreView
+                exploreQuery={exploreQuery}
+                exploreFilter={exploreFilter}
+                exploreData={exploreData}
+                postsLoading={postsLoading}
+                currentUserId={me?.id ?? ""}
+                onQueryChange={setExploreQuery}
+                onFilterChange={setExploreFilter}
+                onRefreshPosts={() => fetchPosts()}
+                onOpenPostDiscussion={openPostDiscussion}
+                onOpenUserProfile={openUserProfile}
+                onStartConversation={handleStartConversation}
+              />
             ) : currentView === "alerts" ? (
-              <>
-                <div className="feed-head">
-                  <h1>Alertas</h1>
-                </div>
-
-                <NotificationsPanel
-                  notifications={notifications}
-                  loading={notificationsLoading}
-                  error={notificationsError}
-                  notice={notificationsNotice}
-                  unreadCount={unreadNotificationsCount}
-                  onRefresh={() => fetchNotifications()}
-                  onMarkAllRead={handleMarkAllNotificationsRead}
-                  onMarkRead={handleMarkNotificationRead}
-                  onOpenPost={handleOpenNotificationPost}
-                  onAuthorClick={handleNotificationAuthorClick}
-                />
-              </>
+              <AlertsView
+                notifications={notifications}
+                loading={notificationsLoading}
+                error={notificationsError}
+                notice={notificationsNotice}
+                unreadCount={unreadNotificationsCount}
+                onRefresh={() => fetchNotifications()}
+                onMarkAllRead={handleMarkAllNotificationsRead}
+                onMarkRead={handleMarkNotificationRead}
+                onOpenPost={handleOpenNotificationPost}
+                onOpenConversation={handleOpenNotificationConversation}
+                onAuthorClick={handleNotificationAuthorClick}
+              />
             ) : currentView === "conversations" ? (
-              <>
-                {/* Tela de conversas: ainda mockada, mas ja organizada em lista + conversa ativa. */}
-                <div className="feed-head">
-                  <h1>Conversas</h1>
-                </div>
-
-                <section className="panel chat-page-card">
-                  <aside
-                    className="chat-list-panel"
-                    aria-label="Lista de conversas"
-                  >
-                    <div className="chat-list-head">
-                      <h2>Pessoas</h2>
-                      <small>1 conversa disponível</small>
-                    </div>
-
-                    <div className="chat-list">
-                      <button
-                        type="button"
-                        className={`chat-list-item ${
-                          selectedConversationId === CHAT_BOT_CONTACT.id
-                            ? "is-active"
-                            : ""
-                        }`}
-                        onClick={() =>
-                          setSelectedConversationId(CHAT_BOT_CONTACT.id)
-                        }
-                      >
-                        <div className="chat-avatar">
-                          {CHAT_BOT_CONTACT.initials}
-                        </div>
-                        <div className="chat-item-meta">
-                          <div className="chat-item-row">
-                            <strong>{CHAT_BOT_CONTACT.name}</strong>
-                            <span>
-                              {CHAT_BOT_MESSAGES.at(-1)?.time ?? "--:--"}
-                            </span>
-                          </div>
-                          <div className="chat-item-row muted">
-                            <span>{CHAT_BOT_CONTACT.handle}</span>
-                            <p>{CHAT_BOT_CONTACT.preview}</p>
-                          </div>
-                        </div>
-                      </button>
-                    </div>
-                  </aside>
-
-                  <section
-                    className="chat-thread-panel"
-                    aria-label="Conversa ativa"
-                  >
-                    {selectedConversationId === CHAT_BOT_CONTACT.id ? (
-                      <>
-                        <header className="chat-thread-head">
-                          <div className="chat-avatar is-large">
-                            {CHAT_BOT_CONTACT.initials}
-                          </div>
-                          <div>
-                            <strong>{CHAT_BOT_CONTACT.name}</strong>
-                            <p>
-                              {CHAT_BOT_CONTACT.status === "online"
-                                ? "Online"
-                                : "Offline"}
-                            </p>
-                          </div>
-                        </header>
-
-                        <div className="chat-thread-body">
-                          {CHAT_BOT_MESSAGES.map((message) => (
-                            <div
-                              key={message.id}
-                              className={`chat-bubble-row ${
-                                message.sender === "me" ? "is-me" : "is-bot"
-                              }`}
-                            >
-                              <div className="chat-bubble">
-                                <p>{message.text}</p>
-                                <span>{message.time}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="chat-thread-composer">
-                          <input
-                            type="text"
-                            placeholder="Escreva uma mensagem (mock por enquanto)"
-                            disabled
-                          />
-                          <button type="button" disabled>
-                            Enviar
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="chat-thread-empty">
-                        <p>Selecione uma conversa para começar.</p>
-                      </div>
-                    )}
-                  </section>
-                </section>
-              </>
+              <ConversationsView
+                conversations={conversations}
+                conversationsLoading={conversationsLoading}
+                conversationsError={conversationsError}
+                socketConnected={conversationSocketConnected}
+                conversationCandidates={conversationCandidates}
+                conversationStarting={conversationStarting}
+                activeConversation={activeConversation}
+                activeConversationState={activeConversationState}
+                currentUserId={me?.id ?? ""}
+                onRefreshConversations={() => fetchConversations()}
+                onSelectConversation={handleSelectConversation}
+                onLoadMoreMessages={() =>
+                  loadConversationMessages(activeConversationId, {
+                    append: true,
+                  })
+                }
+                onDraftChange={handleConversationDraftChange}
+                onSendMessage={handleSendConversationMessage}
+                onStartConversation={handleStartConversation}
+                onOpenExplore={openExplore}
+              />
             ) : currentView === "settings" ? (
-              <>
-                <div className="feed-head">
-                  <h1>Ajustes</h1>
-                </div>
-
-                <section className="settings-page">
-                  <div className="panel settings-account-card">
-                    <div className="settings-account-main">
-                      <div className="settings-account-avatar">
-                        {userInitial}
-                      </div>
-                      <div>
-                        <div className="profile-social-row">
-                          <span className="profile-role-pill">
-                            {me?.role ?? "Membro da comunidade"}
-                          </span>
-                          <span className="profile-presence-pill">
-                            Online agora
-                          </span>
-                        </div>
-                        <h2>{sessionName}</h2>
-                        <p>{sessionHandle}</p>
-                      </div>
-                    </div>
-                    <div className="settings-account-actions">
-                      <button
-                        type="button"
-                        className="follow-btn"
-                        onClick={openProfile}
-                      >
-                        Abrir perfil
-                      </button>
-                      <button
-                        type="button"
-                        className="settings-danger-btn"
-                        onClick={handleLogout}
-                      >
-                        Sair
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="settings-grid">
-                    <section className="panel settings-section-card">
-                      <div className="settings-section-head">
-                        <h2>Conta</h2>
-                        <span>Perfil público</span>
-                      </div>
-                      <div className="settings-list">
-                        <div className="settings-row">
-                          <div>
-                            <strong>E-mail</strong>
-                            <span>{me?.email ?? sessionEmail}</span>
-                          </div>
-                        </div>
-                        <div className="settings-row">
-                          <div>
-                            <strong>Usuário</strong>
-                            <span>{sessionHandle}</span>
-                          </div>
-                        </div>
-                        <div className="settings-row">
-                          <div>
-                            <strong>Interesses</strong>
-                            <span>
-                              {me?.interests?.length
-                                ? `${me.interests.length} selecionados`
-                                : "Nenhum selecionado"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="panel settings-section-card">
-                      <div className="settings-section-head">
-                        <h2>Preferências</h2>
-                        <span>Experiência</span>
-                      </div>
-                      <div className="settings-list">
-                        <div className="settings-row">
-                          <div>
-                            <strong>Aparência</strong>
-                            <span>{themeSummary}</span>
-                          </div>
-                          <div
-                            className="settings-choice-group"
-                            aria-label="Selecionar aparência"
-                          >
-                            {THEME_OPTIONS.map((option) => (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={
-                                  themePreference === option.value
-                                    ? "is-selected"
-                                    : ""
-                                }
-                                aria-pressed={themePreference === option.value}
-                                onClick={() => setThemePreference(option.value)}
-                              >
-                                <span
-                                  className={`theme-option-dot is-${option.value}`}
-                                  aria-hidden="true"
-                                />
-                                <span>{option.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="settings-row">
-                          <div>
-                            <strong>Alertas</strong>
-                            <span>
-                              {formatCount(unreadNotificationsCount)} não lidos
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="mini-link-btn"
-                            onClick={openAlerts}
-                          >
-                            Ver alertas
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="panel settings-section-card">
-                      <div className="settings-section-head">
-                        <h2>Reputação</h2>
-                        <span>Progresso</span>
-                      </div>
-                      <div className="settings-list">
-                        <div className="settings-row">
-                          <div>
-                            <strong>Score da comunidade</strong>
-                            <span>
-                              {communityProgress.currentLevel.label} ·{" "}
-                              {formatCount(communityProgress.score)} pontos
-                            </span>
-                          </div>
-                          <span className="settings-status-pill">
-                            {communityProgress.profileCompletion}% perfil
-                          </span>
-                        </div>
-                        <div className="settings-row">
-                          <div>
-                            <strong>Próximo passo</strong>
-                            <span>{communityProgress.nextAction}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="panel settings-section-card is-wide">
-                      <div className="settings-section-head">
-                        <h2>Sessão</h2>
-                        <span>Dispositivo atual</span>
-                      </div>
-                      <div className="settings-list">
-                        <div className="settings-row">
-                          <div>
-                            <strong>Status</strong>
-                            <span>Conectado como {sessionHandle}</span>
-                          </div>
-                          <span className="settings-status-pill">Ativa</span>
-                        </div>
-                        <div className="settings-row">
-                          <div>
-                            <strong>Conta</strong>
-                            <span>
-                              Criada em{" "}
-                              {me?.createdAt
-                                ? new Date(me.createdAt).toLocaleDateString(
-                                    "pt-BR",
-                                  )
-                                : "Sessão atual"}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="settings-danger-btn"
-                            onClick={handleLogout}
-                          >
-                            Encerrar sessão
-                          </button>
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-                </section>
-              </>
+              <SettingsView
+                userInitial={userInitial}
+                me={me}
+                sessionName={sessionName}
+                sessionHandle={sessionHandle}
+                sessionEmail={sessionEmail}
+                themeSummary={themeSummary}
+                themePreference={themePreference}
+                unreadNotificationsCount={unreadNotificationsCount}
+                communityProgress={communityProgress}
+                onOpenProfile={openProfile}
+                onOpenAlerts={openAlerts}
+                onThemePreferenceChange={setThemePreference}
+                onLogout={handleLogout}
+              />
+            ) : currentView === "plus" ? (
+              <EurecaPlusView
+                me={me}
+                sessionName={sessionName}
+                token={token}
+                onMembershipActivated={handleActivateEurecaPlus}
+                onMembershipCancelled={handleCancelEurecaPlus}
+              />
             ) : (
-              <>
-                {/* Tela principal do feed com composer e lista de posts. */}
-                <div className="feed-head">
-                  <h1>Início</h1>
-                  <div className="feed-tabs">
-                    <button type="button" className="feed-tab is-active">
-                      Pra você
-                    </button>
-                    <button type="button" className="feed-tab">
-                      Seguindo
-                    </button>
-                  </div>
-                </div>
-
-                <section
-                  className={`panel composer-card ${composerHasContent ? "has-content" : ""}`}
-                >
-                  {/* Area onde o usuario escreve um novo post. */}
-                  <div className="composer-head">
-                    <div>
-                      <span className="composer-kicker">Novo post</span>
-                      <h2>Compartilhe com a comunidade</h2>
-                    </div>
-                    <span className="composer-shortcut">Ctrl + Enter</span>
-                  </div>
-                  <div className="composer-top">
-                    <div className="composer-avatar">{userInitial}</div>
-                    <div className="composer-main">
-                      <textarea
-                        ref={composerInputRef}
-                        className="composer-input"
-                        placeholder="Escreva uma ideia, pergunta ou progresso..."
-                        value={content}
-                        onChange={(event) => {
-                          setContent(event.target.value);
-                          if (composerError) setComposerError("");
-                          if (composerNotice) setComposerNotice("");
-                        }}
-                        onKeyDown={handleComposerKeyDown}
-                        maxLength={280}
-                      />
-                      <div
-                        className="composer-prompts"
-                        aria-label="Sugestões rápidas"
-                      >
-                        {COMPOSER_PROMPTS.map((prompt) => (
-                          <button
-                            key={prompt.label}
-                            type="button"
-                            onClick={() => handleUseComposerPrompt(prompt.text)}
-                          >
-                            {prompt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="composer-bottom">
-                    <div className="composer-tools">
-                      {COMPOSER_TOOLS.map((tool) => (
-                        <button
-                          key={tool.label}
-                          type="button"
-                          title={`${tool.label} em breve`}
-                          disabled
-                        >
-                          <Icon name={tool.icon} />
-                          <span>{tool.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="composer-actions">
-                      <span
-                        className={`composer-counter ${
-                          content.length >= 260
-                            ? "is-max"
-                            : content.length >= 230
-                              ? "is-warn"
-                              : ""
-                        }`}
-                      >
-                        {content.length}/280
-                      </span>
-                      <button
-                        type="button"
-                        className={`post-btn ${composerHasContent ? "is-ready" : ""}`}
-                        onClick={handleCreatePost}
-                        disabled={createLoading || !composerHasContent}
-                      >
-                        {createLoading ? "Postando..." : "Postar agora"}
-                      </button>
-                    </div>
-                  </div>
-                  {composerError ? (
-                    <p className="composer-feedback is-error">
-                      {composerError}
-                    </p>
-                  ) : null}
-                  {composerNotice ? (
-                    <p className="composer-feedback is-success">
-                      {composerNotice}
-                    </p>
-                  ) : null}
-                </section>
-
-                {feedError ? (
-                  <p className="feed-feedback is-error">{feedError}</p>
-                ) : null}
-
-                <section className="panel feed-context-card">
-                  <div className="feed-context-main">
-                    <span className="feed-context-kicker">Feed contextual</span>
-                    <h2>
-                      {feedOverview.activeDiscussions > 0
-                        ? "Há discussões para entrar agora"
-                        : "Novas publicações para descobrir"}
-                    </h2>
-                    <p>
-                      {feedOverview.topPost
-                        ? `Em destaque: ${truncateText(feedOverview.topPost.text, 92)}`
-                        : "Quando houver mais atividade, este bloco destaca conversas e temas relevantes."}
-                    </p>
-                  </div>
-                  <div className="feed-context-metrics">
-                    <div>
-                      <strong>{formatCount(posts.length)}</strong>
-                      <span>posts</span>
-                    </div>
-                    <div>
-                      <strong>
-                        {formatCount(feedOverview.activeDiscussions)}
-                      </strong>
-                      <span>discussões</span>
-                    </div>
-                    <div>
-                      <strong>{formatCount(feedOverview.views)}</strong>
-                      <span>views</span>
-                    </div>
-                  </div>
-                </section>
-
-                {/* Lista do feed, incluindo estados de carregamento e vazio. */}
-                <div className="post-list">
-                  {postsLoading ? (
-                    <div className="panel post-card empty-state">
-                      Carregando posts...
-                    </div>
-                  ) : null}
-
-                  {!postsLoading && posts.length === 0 ? (
-                    <div className="panel post-card empty-state">
-                      Nenhum post ainda. Seja o primeiro a publicar.
-                    </div>
-                  ) : null}
-
-                  {posts.map((post, index) => (
-                    <div
-                      key={post.id ?? `${post.handle}-${post.time}`}
-                      className="feed-item-block"
-                    >
-                      {index === 0 ? (
-                        <div className="feed-separator">
-                          <span>Mais recentes</span>
-                          <strong>Atualizado pelo feed da comunidade</strong>
-                        </div>
-                      ) : null}
-
-                      {index === feedOverview.firstDiscussionIndex &&
-                      feedOverview.firstDiscussionIndex > 0 ? (
-                        <div className="feed-separator is-accent">
-                          <span>Discussões em andamento</span>
-                          <strong>Posts com comentários para participar</strong>
-                        </div>
-                      ) : null}
-
-                      {index === feedOverview.continueIndex &&
-                      index !== feedOverview.firstDiscussionIndex ? (
-                        <div className="feed-separator">
-                          <span>Continue explorando</span>
-                          <strong>Mais publicações da rede</strong>
-                        </div>
-                      ) : null}
-
-                      <PostCard
-                        post={post}
-                        interactive
-                        feedContext={getPostFeedContext(post, index)}
-                        onToggleLike={handleToggleLike}
-                        onToggleComments={handleToggleComments}
-                        onViewed={handlePostViewed}
-                        onAuthorClick={openUserProfile}
-                        commentsOpen={activeCommentsPostId === post.id}
-                        commentPreviewLoading={Boolean(
-                          commentsByPost[post.id]?.previewLoading,
-                        )}
-                        commentPreview={(commentsByPost[post.id]?.items ?? [])
-                          .filter((comment) => !comment.parentCommentId)
-                          .slice(0, 2)}
-                      >
-                        {activeCommentsPostId === post.id ? (
-                          <CommentsPanel
-                            post={post}
-                            state={commentsByPost[post.id]}
-                            draft={commentsByPost[post.id]?.draft ?? ""}
-                            userInitial={userInitial}
-                            maxLength={COMMENT_MAX_LENGTH}
-                            currentUserId={me?.id ?? ""}
-                            onDraftChange={(draft) =>
-                              updateCommentDraft(post.id, draft)
-                            }
-                            onSubmit={() => handleCreateComment(post.id)}
-                            onRefresh={() => loadCommentsForPost(post.id)}
-                            onLoadMore={() =>
-                              loadCommentsForPost(post.id, { append: true })
-                            }
-                            onLoadReplies={(commentId) =>
-                              loadRepliesForComment(post.id, commentId)
-                            }
-                            onAuthorClick={openUserProfile}
-                            onReply={(commentId) =>
-                              handleReplyToComment(post.id, commentId)
-                            }
-                            onCancelReply={() => handleCancelReply(post.id)}
-                            onDelete={(commentId) =>
-                              handleDeleteComment(post.id, commentId)
-                            }
-                          />
-                        ) : null}
-                      </PostCard>
-                    </div>
-                  ))}
-                </div>
-              </>
+              <HomeView
+                userInitial={userInitial}
+                content={content}
+                composerImage={composerImage}
+                composerHasContent={composerHasContent}
+                composerHasImage={composerHasImage}
+                composerCanPost={composerCanPost}
+                imageUploadLoading={imageUploadLoading}
+                createLoading={createLoading}
+                composerError={composerError}
+                composerNotice={composerNotice}
+                composerInputRef={composerInputRef}
+                composerImageInputRef={composerImageInputRef}
+                feedError={feedError}
+                feedOverview={feedOverview}
+                feedMode={feedMode}
+                posts={posts}
+                postsLoading={postsLoading}
+                commentsByPost={commentsByPost}
+                activeCommentsPostId={activeCommentsPostId}
+                currentUserId={me?.id ?? ""}
+                onComposerContentChange={handleComposerContentChange}
+                onComposerKeyDown={handleComposerKeyDown}
+                onUseComposerPrompt={handleUseComposerPrompt}
+                onChooseComposerImage={handleChooseComposerImage}
+                onRemoveComposerImage={handleRemoveComposerImage}
+                onComposerImageChange={handleComposerImageChange}
+                onCreatePost={handleCreatePost}
+                onToggleLike={handleToggleLike}
+                onToggleComments={handleToggleComments}
+                onDeletePost={handleDeletePost}
+                onReportPost={openReportDialog}
+                onPostViewed={handlePostViewed}
+                onAuthorClick={openUserProfile}
+                onUpdateCommentDraft={updateCommentDraft}
+                onCreateComment={handleCreateComment}
+                onLoadCommentsForPost={loadCommentsForPost}
+                onLoadRepliesForComment={loadRepliesForComment}
+                onReplyToComment={handleReplyToComment}
+                onCancelReply={handleCancelReply}
+                onDeleteComment={handleDeleteComment}
+                onFeedModeChange={handleFeedModeChange}
+              />
             )}
           </section>
 
           <RightRail
             posts={posts}
-            trends={trends}
+            trends={resolvedTrends}
             communityProgress={communityProgress}
             unreadNotificationsCount={unreadNotificationsCount}
             onOpenDiscussion={openPostDiscussion}
+            onTrendClick={openTrend}
             onUsePrompt={handleUseComposerPrompt}
           />
         </main>
       </div>
+
+      {reportDialog.postId ? (
+        <div className="report-dialog-backdrop" role="presentation">
+          <section
+            className="report-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="report-dialog-title"
+          >
+            <div className="report-dialog-head">
+              <div>
+                <span>Denúncia acadêmica</span>
+                <h2 id="report-dialog-title">Denunciar post</h2>
+              </div>
+              <button
+                type="button"
+                className="plus-checkout-close"
+                aria-label="Fechar denúncia"
+                onClick={closeReportDialog}
+                disabled={reportDialog.loading}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="report-reason-list">
+              {REPORT_REASONS.map((reason) => (
+                <button
+                  key={reason.value}
+                  type="button"
+                  className={
+                    reportDialog.selectedReason === reason.value
+                      ? "is-selected"
+                      : ""
+                  }
+                  aria-pressed={reportDialog.selectedReason === reason.value}
+                  onClick={() => selectReportReason(reason.value)}
+                  disabled={reportDialog.loading}
+                >
+                  <strong>{reason.value}</strong>
+                  <span>{reason.description}</span>
+                </button>
+              ))}
+            </div>
+
+            {reportDialog.error ? (
+              <p className="report-dialog-error">{reportDialog.error}</p>
+            ) : null}
+
+            <div className="report-dialog-actions">
+              <button
+                type="button"
+                className="mini-link-btn"
+                onClick={closeReportDialog}
+                disabled={reportDialog.loading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="plus-confirm-btn"
+                onClick={submitReportPost}
+                disabled={reportDialog.loading}
+              >
+                {reportDialog.loading ? "Enviando..." : "Enviar denúncia"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

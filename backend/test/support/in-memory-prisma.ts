@@ -13,6 +13,7 @@ type UserRecord = {
 type PostRecord = {
   id: string;
   content: string;
+  imageUrl: string | null;
   createdAt: Date;
   viewCount: number;
   authorId: string;
@@ -38,12 +39,16 @@ type CommentRecord = {
 type NotificationRecord = {
   id: string;
   type: string;
+  title: string | null;
+  body: string | null;
   readAt: Date | null;
   createdAt: Date;
   recipientId: string;
-  actorId: string;
-  postId: string;
-  commentId: string;
+  actorId: string | null;
+  postId: string | null;
+  commentId: string | null;
+  conversationId: string | null;
+  messageId: string | null;
 };
 
 type UserSelect = {
@@ -61,6 +66,7 @@ type UserSelect = {
 type PostSelect = {
   id?: boolean;
   content?: boolean;
+  imageUrl?: boolean;
   createdAt?: boolean;
   viewCount?: boolean;
   authorId?: boolean;
@@ -105,12 +111,16 @@ type CommentSelect = {
 type NotificationSelect = {
   id?: boolean;
   type?: boolean;
+  title?: boolean;
+  body?: boolean;
   readAt?: boolean;
   createdAt?: boolean;
   recipientId?: boolean;
   actorId?: boolean;
   postId?: boolean;
   commentId?: boolean;
+  conversationId?: boolean;
+  messageId?: boolean;
   actor?: {
     select?: UserSelect;
   };
@@ -118,10 +128,23 @@ type NotificationSelect = {
     select?: {
       id?: boolean;
       content?: boolean;
+      imageUrl?: boolean;
     };
   };
   comment?: {
     select?: CommentSelect;
+  };
+  conversation?: {
+    select?: {
+      id?: boolean;
+    };
+  };
+  message?: {
+    select?: {
+      id?: boolean;
+      content?: boolean;
+      conversationId?: boolean;
+    };
   };
 };
 
@@ -207,12 +230,13 @@ export class InMemoryPrismaService {
       data,
       select,
     }: {
-      data: { content: string; authorId: string };
+      data: { content: string; authorId: string; imageUrl?: string | null };
       select?: PostSelect;
     }) => {
       const record: PostRecord = {
         id: `post-${this.postCounter++}`,
         content: data.content,
+        imageUrl: data.imageUrl ?? null,
         createdAt: this.nextDate(),
         viewCount: 0,
         authorId: data.authorId,
@@ -514,7 +538,8 @@ export class InMemoryPrismaService {
       );
       this.comments.splice(0, this.comments.length, ...remaining);
       const remainingNotifications = this.notifications.filter(
-        (notification) => !idsToDelete.has(notification.commentId),
+        (notification) =>
+          !notification.commentId || !idsToDelete.has(notification.commentId),
       );
       this.notifications.splice(
         0,
@@ -578,21 +603,29 @@ export class InMemoryPrismaService {
       data: {
         type: string;
         recipientId: string;
-        actorId: string;
-        postId: string;
-        commentId: string;
+        actorId?: string | null;
+        postId?: string | null;
+        commentId?: string | null;
+        conversationId?: string | null;
+        messageId?: string | null;
+        title?: string | null;
+        body?: string | null;
       };
       select?: NotificationSelect;
     }) => {
       const record: NotificationRecord = {
         id: `notification-${this.notificationCounter++}`,
         type: data.type,
+        title: data.title ?? null,
+        body: data.body ?? null,
         readAt: null,
         createdAt: this.nextDate(),
         recipientId: data.recipientId,
-        actorId: data.actorId,
-        postId: data.postId,
-        commentId: data.commentId,
+        actorId: data.actorId ?? null,
+        postId: data.postId ?? null,
+        commentId: data.commentId ?? null,
+        conversationId: data.conversationId ?? null,
+        messageId: data.messageId ?? null,
       };
 
       this.notifications.push(record);
@@ -711,6 +744,7 @@ export class InMemoryPrismaService {
     return {
       ...(select.id ? { id: record.id } : {}),
       ...(select.content ? { content: record.content } : {}),
+      ...(select.imageUrl ? { imageUrl: record.imageUrl } : {}),
       ...(select.createdAt ? { createdAt: record.createdAt } : {}),
       ...(select.viewCount ? { viewCount: record.viewCount } : {}),
       ...(select.authorId ? { authorId: record.authorId } : {}),
@@ -782,19 +816,27 @@ export class InMemoryPrismaService {
       return { ...record };
     }
 
-    const actor = this.users.find((user) => user.id === record.actorId);
+    const actor = record.actorId
+      ? this.users.find((user) => user.id === record.actorId)
+      : null;
     const post = this.posts.find((item) => item.id === record.postId);
     const comment = this.comments.find((item) => item.id === record.commentId);
 
     return {
       ...(select.id ? { id: record.id } : {}),
       ...(select.type ? { type: record.type } : {}),
+      ...(select.title ? { title: record.title } : {}),
+      ...(select.body ? { body: record.body } : {}),
       ...(select.readAt ? { readAt: record.readAt } : {}),
       ...(select.createdAt ? { createdAt: record.createdAt } : {}),
       ...(select.recipientId ? { recipientId: record.recipientId } : {}),
       ...(select.actorId ? { actorId: record.actorId } : {}),
       ...(select.postId ? { postId: record.postId } : {}),
       ...(select.commentId ? { commentId: record.commentId } : {}),
+      ...(select.conversationId
+        ? { conversationId: record.conversationId }
+        : {}),
+      ...(select.messageId ? { messageId: record.messageId } : {}),
       ...(select.actor && actor
         ? { actor: this.selectUser(actor, select.actor.select) }
         : {}),
@@ -803,6 +845,9 @@ export class InMemoryPrismaService {
             post: {
               ...(select.post.select?.id ? { id: post.id } : {}),
               ...(select.post.select?.content ? { content: post.content } : {}),
+              ...(select.post.select?.imageUrl
+                ? { imageUrl: post.imageUrl }
+                : {}),
             },
           }
         : {}),

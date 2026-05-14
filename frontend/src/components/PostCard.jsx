@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icons";
 
 // Card visual de um post.
@@ -8,15 +8,20 @@ function PostCard({
   interactive = false,
   onToggleLike,
   onToggleComments,
+  onDeletePost,
+  onReportPost,
   onViewed,
   onAuthorClick,
+  currentUserId = "",
   commentsOpen = false,
   commentPreview = [],
   commentPreviewLoading = false,
   feedContext = null,
   children,
 }) {
+  const [postMenuOpen, setPostMenuOpen] = useState(false);
   const cardRef = useRef(null);
+  const menuRef = useRef(null);
   const repliesCount = Number(post.counts?.replies ?? 0);
   const likesCount = Number(post.counts?.likes ?? 0);
   const viewsCount = Number(post.counts?.views ?? 0);
@@ -37,6 +42,10 @@ function PostCard({
   const showCommentPreview =
     !commentsOpen &&
     (commentPreviewLoading || commentPreview.length > 0 || hasDiscussion);
+  const canDeletePost = interactive && post.authorId === currentUserId;
+  const canReportPost =
+    interactive && currentUserId && post.authorId !== currentUserId;
+  const showPostMenu = canDeletePost || canReportPost;
 
   useEffect(() => {
     if (!interactive || !post.id || !onViewed || !cardRef.current) {
@@ -80,6 +89,19 @@ function PostCard({
     };
   }, [interactive, onViewed, post.id]);
 
+  useEffect(() => {
+    if (!postMenuOpen) return undefined;
+
+    const handleClickOutside = (event) => {
+      if (!menuRef.current?.contains(event.target)) {
+        setPostMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [postMenuOpen]);
+
   return (
     <article
       className={`panel post-card ${interactive ? "is-interactive" : ""} ${
@@ -121,6 +143,14 @@ function PostCard({
                   {post.authorBadge.label}
                 </span>
               ) : null}
+              {post.eurecaPlusRank ? (
+                <span
+                  className={`eureca-plus-rank-badge is-${post.eurecaPlusRank.tone}`}
+                  title={post.eurecaPlusRank.meta}
+                >
+                  {post.eurecaPlusRank.shortLabel}
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="post-author-handle"
@@ -139,18 +169,66 @@ function PostCard({
                 </>
               ) : null}
             </div>
-            {interactive ? (
-              <button
-                type="button"
-                className="post-more-btn"
-                aria-label="Mais opções do post"
-                disabled
-              >
-                <Icon name="more" />
-              </button>
-            ) : null}
+            {showPostMenu ? (
+              <div className="post-menu" ref={menuRef}>
+                <button
+                  type="button"
+                  className="post-more-btn"
+                  aria-label="Mais opções do post"
+                  aria-expanded={postMenuOpen}
+                  data-tooltip="Mais opções"
+                  onClick={() => setPostMenuOpen((open) => !open)}
+                >
+                  <Icon name="more" />
+                </button>
+                {postMenuOpen ? (
+                  <div className="post-menu-popover" role="menu">
+                    {canDeletePost ? (
+                      <>
+                        <button type="button" role="menuitem" disabled>
+                          Editar post
+                          <span>Em breve</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="is-danger"
+                          onClick={() => {
+                            setPostMenuOpen(false);
+                            onDeletePost?.(post.id);
+                          }}
+                        >
+                          Apagar post
+                        </button>
+                      </>
+                    ) : null}
+                    {canReportPost ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="is-warning"
+                        onClick={() => {
+                          setPostMenuOpen(false);
+                          onReportPost?.(post.id);
+                        }}
+                      >
+                        <span className="post-menu-icon">
+                          <Icon name="flag" />
+                        </span>
+                        Denunciar post
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : interactive ? null : null}
           </div>
           <p className="post-copy">{post.text}</p>
+          {post.imageUrl ? (
+            <div className="post-media">
+              <img src={post.imageUrl} alt="" loading="lazy" />
+            </div>
+          ) : null}
         </div>
       </div>
 

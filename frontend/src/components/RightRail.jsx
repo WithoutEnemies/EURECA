@@ -12,6 +12,7 @@ function RightRail({
   communityProgress,
   unreadNotificationsCount,
   onOpenDiscussion,
+  onTrendClick,
   onUsePrompt,
 }) {
   const activeDiscussions = [...posts]
@@ -41,7 +42,7 @@ function RightRail({
           </div>
           <div>
             <strong>{formatCount(unreadNotificationsCount)}</strong>
-            <span>Alertas</span>
+            <span>Notificações</span>
           </div>
         </div>
       </section>
@@ -110,11 +111,20 @@ function RightRail({
           <span>trending</span>
         </div>
         <div className="topic-pill-list">
+          {trends.length === 0 ? (
+            <p className="right-empty">Sem tópicos reais no feed.</p>
+          ) : null}
+
           {trends.map((trend) => (
-            <div key={trend.title} className="topic-pill">
+            <button
+              key={trend.title}
+              type="button"
+              className="topic-pill"
+              onClick={() => onTrendClick?.(trend)}
+            >
               <strong>{trend.title}</strong>
               <span>{trend.posts}</span>
-            </div>
+            </button>
           ))}
         </div>
       </section>

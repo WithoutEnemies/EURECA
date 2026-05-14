@@ -27,6 +27,12 @@ function AuthScreen({
   const isRegister = authMode === 'register'
   const selectedInterests = registerProfile?.interests ?? []
 
+  const handleBrandDebugClick = (event) => {
+    if (event.detail === 3 && !authLoading) {
+      onDevLogin?.()
+    }
+  }
+
   const toggleInterest = (interest) => {
     const isSelected = selectedInterests.includes(interest)
     if (!isSelected && selectedInterests.length >= REGISTER_MAX_INTERESTS) {
@@ -46,9 +52,14 @@ function AuthScreen({
         <div className={`login-panel panel ${isRegister ? 'is-register' : ''}`}>
           {/* Bloco visual da marca e texto de boas-vindas. */}
           <div className="login-brand">
-            <div className="brand-mark">
+            <button
+              type="button"
+              className="brand-mark login-brand-debug"
+              onClick={handleBrandDebugClick}
+              aria-label="Atalho de debug"
+            >
               <WaveMark />
-            </div>
+            </button>
             <div>
               <strong>Eureca</strong>
               <span>Entre para acessar a comunidade</span>
@@ -240,19 +251,6 @@ function AuthScreen({
                   ? 'Criar conta'
                   : 'Entrar na Eureca'}
             </button>
-
-            {!isRegister ? (
-              <button
-                type="button"
-                className="login-dev-btn"
-                onClick={onDevLogin}
-                disabled={authLoading}
-                title="Conta de teste: dev@eureca.local"
-              >
-                {/* Atalho de desenvolvimento para entrar rapido no sistema. */}
-                Entrar com Dev
-              </button>
-            ) : null}
           </form>
 
           {/* Alterna entre os dois modos sem trocar de pagina. */}

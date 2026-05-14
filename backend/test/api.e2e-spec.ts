@@ -238,6 +238,7 @@ describe('API flows (e2e)', () => {
     expect(createResponse.body).toEqual({
       id: 'post-1',
       content: 'Meu primeiro post',
+      imageUrl: null,
       createdAt: '2026-01-01T00:00:01.000Z',
       viewCount: 0,
       likesCount: 0,
@@ -248,6 +249,7 @@ describe('API flows (e2e)', () => {
         email: 'writer@eureca.local',
         name: null,
         username: null,
+        role: null,
       },
     });
 
@@ -309,6 +311,7 @@ describe('API flows (e2e)', () => {
           email: 'writer@eureca.local',
           name: null,
           username: null,
+          role: null,
         },
       },
       commentsCount: 1,
@@ -327,6 +330,7 @@ describe('API flows (e2e)', () => {
         {
           id: 'post-1',
           content: 'Meu primeiro post',
+          imageUrl: null,
           createdAt: '2026-01-01T00:00:01.000Z',
           viewCount: 1,
           likesCount: 0,
@@ -337,6 +341,7 @@ describe('API flows (e2e)', () => {
             email: 'writer@eureca.local',
             name: null,
             username: null,
+            role: null,
           },
         },
       ]);
@@ -402,6 +407,7 @@ describe('API flows (e2e)', () => {
               email: 'writer@eureca.local',
               name: null,
               username: null,
+              role: null,
             },
           },
         ],
@@ -429,6 +435,7 @@ describe('API flows (e2e)', () => {
               email: 'other@eureca.local',
               name: null,
               username: null,
+              role: null,
             },
           },
         ],
@@ -515,6 +522,7 @@ describe('API flows (e2e)', () => {
           email: 'writer@eureca.local',
           name: null,
           username: null,
+          role: null,
         },
       });
 
@@ -536,6 +544,7 @@ describe('API flows (e2e)', () => {
               email: 'writer@eureca.local',
               name: null,
               username: null,
+              role: null,
             },
           },
         ],
@@ -572,6 +581,7 @@ describe('API flows (e2e)', () => {
         {
           id: 'post-1',
           content: 'Meu primeiro post',
+          imageUrl: null,
           createdAt: '2026-01-01T00:00:01.000Z',
           viewCount: 1,
           likesCount: 0,
@@ -582,9 +592,120 @@ describe('API flows (e2e)', () => {
             email: 'writer@eureca.local',
             name: null,
             username: null,
+            role: null,
           },
         },
       ]);
+  });
+
+  it('uploads a post image and returns a URL that can be saved on a post', async () => {
+    const registerResponse = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: 'image-author@eureca.local', password: 'dev123456' })
+      .expect(201);
+
+    const registerBody: unknown = registerResponse.body;
+    expect(isAuthResponseBody(registerBody)).toBe(true);
+
+    if (!isAuthResponseBody(registerBody)) {
+      throw new Error('Invalid register response');
+    }
+
+    const uploadResponse = await request(app.getHttpServer())
+      .post('/uploads/images')
+      .set('Authorization', `Bearer ${registerBody.access_token}`)
+      .attach('image', Buffer.from('fake image bytes'), {
+        filename: 'post.png',
+        contentType: 'image/png',
+      })
+      .expect(201);
+
+    expect(uploadResponse.body).toMatchObject({
+      imageUrl: expect.stringContaining('/uploads/posts/'),
+      path: expect.stringMatching(/^\/uploads\/posts\/.+\.png$/),
+      filename: expect.stringMatching(/^[a-f0-9-]+\.png$/),
+      originalName: 'post.png',
+      mimeType: 'image/png',
+      size: 16,
+    });
+
+    await request(app.getHttpServer())
+      .post('/uploads/images')
+      .set('Authorization', `Bearer ${registerBody.access_token}`)
+      .attach('image', Buffer.from('invalid image bytes'), {
+        filename: 'post.gif',
+        contentType: 'image/gif',
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/uploads/images')
+      .set('Authorization', `Bearer ${registerBody.access_token}`)
+      .attach('image', Buffer.alloc(5 * 1024 * 1024 + 1), {
+        filename: 'large.png',
+        contentType: 'image/png',
+      })
+      .expect(413)
+      .expect({
+        statusCode: 413,
+        message: 'A imagem precisa ter até 5 MB.',
+        error: 'Payload Too Large',
+      });
+
+    await request(app.getHttpServer())
+      .post('/posts')
+      .set('Authorization', `Bearer ${registerBody.access_token}`)
+      .send({
+        content: 'Tentativa com imagem externa',
+        imageUrl: 'https://example.com/image.gif',
+      })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.message).toContain(
+          'Use uma imagem enviada pelo EURECA em JPG, PNG ou WebP.',
+        );
+      });
+
+    const createResponse = await request(app.getHttpServer())
+      .post('/posts')
+      .set('Authorization', `Bearer ${registerBody.access_token}`)
+      .send({
+        content: 'Post com imagem enviada',
+        imageUrl: uploadResponse.body.imageUrl,
+      })
+      .expect(201);
+
+    expect(createResponse.body).toMatchObject({
+      id: 'post-1',
+      content: 'Post com imagem enviada',
+      imageUrl: uploadResponse.body.imageUrl,
+    });
+
+    const publicFeedResponse = await request(app.getHttpServer())
+      .get('/posts')
+      .expect(200);
+
+    expect(publicFeedResponse.body).toEqual([
+      expect.objectContaining({
+        id: 'post-1',
+        content: 'Post com imagem enviada',
+        imageUrl: uploadResponse.body.imageUrl,
+      }),
+    ]);
+
+    const privateFeedResponse = await request(app.getHttpServer())
+      .get('/posts/me/feed')
+      .set('Authorization', `Bearer ${registerBody.access_token}`)
+      .expect(200);
+
+    expect(privateFeedResponse.body).toEqual([
+      expect.objectContaining({
+        id: 'post-1',
+        content: 'Post com imagem enviada',
+        imageUrl: uploadResponse.body.imageUrl,
+        viewerLiked: false,
+      }),
+    ]);
   });
 
   it('paginates comment threads and protects notification ownership', async () => {
@@ -699,6 +820,7 @@ describe('API flows (e2e)', () => {
               email: 'replier@eureca.local',
               name: null,
               username: null,
+              role: null,
             },
           },
         ],

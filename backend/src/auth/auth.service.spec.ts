@@ -30,6 +30,8 @@ describe('AuthService', () => {
     role: true,
     bio: true,
     interests: true,
+    eurecaPlusPlan: true,
+    eurecaPlusSince: true,
     createdAt: true,
   };
 
@@ -65,6 +67,8 @@ describe('AuthService', () => {
       role: 'Desenvolvimento',
       bio: 'Criando uma comunidade.',
       interests: ['Frontend', 'Backend'],
+      eurecaPlusPlan: 'creator',
+      eurecaPlusSince: null,
       createdAt,
     });
     jwt.signAsync.mockResolvedValue('signed-token');
@@ -112,6 +116,8 @@ describe('AuthService', () => {
         role: 'Desenvolvimento',
         bio: 'Criando uma comunidade.',
         interests: ['Frontend', 'Backend'],
+        eurecaPlusPlan: 'creator',
+        eurecaPlusSince: null,
         createdAt,
       },
     });
@@ -164,6 +170,8 @@ describe('AuthService', () => {
       role: 'Desenvolvimento',
       bio: 'Criando uma comunidade.',
       interests: ['Frontend', 'Backend'],
+      eurecaPlusPlan: null,
+      eurecaPlusSince: null,
       createdAt,
     });
     jwt.signAsync.mockResolvedValue('signed-token');
@@ -191,6 +199,8 @@ describe('AuthService', () => {
         role: 'Desenvolvimento',
         bio: 'Criando uma comunidade.',
         interests: ['Frontend', 'Backend'],
+        eurecaPlusPlan: null,
+        eurecaPlusSince: null,
         createdAt,
       },
     });
@@ -208,6 +218,8 @@ describe('AuthService', () => {
       role: 'Desenvolvimento',
       bio: 'Criando uma comunidade.',
       interests: ['Frontend', 'Backend'],
+      eurecaPlusPlan: null,
+      eurecaPlusSince: null,
       createdAt,
     });
     jwt.signAsync.mockResolvedValue('signed-token');
@@ -242,6 +254,8 @@ describe('AuthService', () => {
       role: null,
       bio: null,
       interests: [],
+      eurecaPlusPlan: null,
+      eurecaPlusSince: null,
       createdAt: new Date('2026-02-01T12:00:00.000Z'),
     });
     (bcrypt.compare as jest.Mock).mockResolvedValue(false);

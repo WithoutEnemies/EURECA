@@ -24,6 +24,8 @@ export class AuthService {
     role: true,
     bio: true,
     interests: true,
+    eurecaPlusPlan: true,
+    eurecaPlusSince: true,
     createdAt: true,
   } as const;
 
@@ -140,6 +142,8 @@ export class AuthService {
         role: user.role,
         bio: user.bio,
         interests: user.interests,
+        eurecaPlusPlan: user.eurecaPlusPlan,
+        eurecaPlusSince: user.eurecaPlusSince,
         createdAt: user.createdAt,
       },
     };

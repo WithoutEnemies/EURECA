@@ -311,7 +311,7 @@ export const REGISTER_INTEREST_OPTIONS = REGISTER_INTEREST_GROUPS.flatMap(
 export const navItems = [
   { label: "Início", icon: "home", view: "home" },
   { label: "Explorar", icon: "compass", view: "explore" },
-  { label: "Alertas", icon: "bell", view: "alerts" },
+  { label: "Notificações", icon: "bell", view: "alerts" },
   { label: "Conversas", icon: "chat", view: "conversations" },
   { label: "Perfil", icon: "user", view: "profile" },
   { label: "Ajustes", icon: "settings", view: "settings" },

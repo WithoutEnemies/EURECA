@@ -23,12 +23,33 @@ model User {
   role                  String?
   bio                   String?
   interests             String[]       @default([])
+  eurecaPlusPlan        String?
+  eurecaPlusSince       DateTime?
   createdAt             DateTime       @default(now())
   posts                 Post[]
   likes                 PostLike[]
   comments              Comment[]
+  postReports           PostReport[]
+  following             UserFollow[]   @relation("UserFollowing")
+  followers             UserFollow[]   @relation("UserFollowers")
+  conversationMembers   ConversationParticipant[]
+  messagesSent          Message[]      @relation("MessageSender")
   notificationsReceived Notification[] @relation("NotificationRecipient")
   notificationsSent     Notification[] @relation("NotificationActor")
+}
+
+// Relacao social entre dois usuarios.
+// "follower" e quem segue; "following" e quem esta sendo seguido.
+model UserFollow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("UserFollowers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
 }
 
 // Representa uma publicacao criada por um usuario.
@@ -36,13 +57,30 @@ model User {
 model Post {
   id            String         @id @default(cuid())
   content       String
+  imageUrl      String?
   createdAt     DateTime       @default(now())
   viewCount     Int            @default(0)
   authorId      String
   author        User           @relation(fields: [authorId], references: [id])
   likes         PostLike[]
   comments      Comment[]
+  reports       PostReport[]
   notifications Notification[]
+}
+
+// Registro de denuncias feitas por usuarios em publicacoes.
+model PostReport {
+  id         String   @id @default(cuid())
+  reason     String?
+  createdAt  DateTime @default(now())
+  postId     String
+  reporterId String
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporter   User     @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, reporterId])
+  @@index([postId])
+  @@index([reporterId])
 }
 
 // Esta tabela registra quem curtiu qual post.
@@ -85,24 +123,73 @@ model Comment {
   @@index([postId, parentCommentId, createdAt])
 }
 
-// Guarda alertas gerados por interacoes sociais entre usuarios.
-// Cada registro pertence a um destinatario e aponta para a acao que disparou o alerta.
+// Agrupa uma troca de mensagens entre duas ou mais pessoas.
+// A tabela de participantes separada permite evoluir de conversas 1:1 para grupos.
+model Conversation {
+  id           String                    @id @default(cuid())
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  participants ConversationParticipant[]
+  messages     Message[]
+  notifications Notification[]
+}
+
+// Liga usuarios a uma conversa e guarda o estado de leitura de cada pessoa.
+model ConversationParticipant {
+  conversationId String
+  userId         String
+  lastReadAt     DateTime?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@index([userId, lastReadAt])
+}
+
+// Mensagem enviada por um participante dentro de uma conversa.
+model Message {
+  id             String       @id @default(cuid())
+  content        String
+  createdAt      DateTime     @default(now())
+  conversationId String
+  senderId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  notifications  Notification[]
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+// Guarda notificacoes geradas por interacoes sociais, mensagens privadas e avisos da plataforma.
+// Cada registro pertence a um destinatario e aponta, quando existir, para a acao que disparou a notificacao.
 model Notification {
-  id          String    @id @default(cuid())
-  type        String
-  readAt      DateTime?
-  createdAt   DateTime  @default(now())
-  recipientId String
-  actorId     String
-  postId      String
-  commentId   String
-  recipient   User      @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  actor       User      @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
-  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
-  comment     Comment   @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  type           String
+  title          String?
+  body           String?
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+  recipientId    String
+  actorId        String?
+  postId         String?
+  commentId      String?
+  conversationId String?
+  messageId      String?
+  recipient      User          @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor          User?         @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  post           Post?         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment        Comment?      @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message        Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([recipientId, readAt, createdAt])
   @@index([actorId])
   @@index([postId])
   @@index([commentId])
+  @@index([conversationId])
+  @@index([messageId])
 }

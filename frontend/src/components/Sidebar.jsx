@@ -6,7 +6,11 @@ function Sidebar({
   me,
   trends,
   suggestions,
+  followActionUserId,
   onNewPost,
+  onTrendClick,
+  onSuggestionClick,
+  onToggleFollow,
 }) {
   const accountLabel = me?.name || me?.email;
   const accountHandle = me?.username ? `@${me.username}` : me?.email;
@@ -62,7 +66,11 @@ function Sidebar({
         </div>
 
         {featuredTrend ? (
-          <div className="trend-featured">
+          <button
+            type="button"
+            className="trend-featured"
+            onClick={() => onTrendClick?.(featuredTrend)}
+          >
             <div className="trend-featured-top">
               <span>{featuredTrend.category}</span>
               <strong>Subindo agora</strong>
@@ -72,50 +80,83 @@ function Sidebar({
             <div className="trend-progress" aria-hidden="true">
               <span />
             </div>
-          </div>
+          </button>
         ) : null}
 
         <div className="trend-pill-list">
+          {!featuredTrend ? (
+            <div className="sidebar-empty-state">
+              Publique com hashtags ou assuntos recorrentes para gerar tópicos.
+            </div>
+          ) : null}
+
           {otherTrends.map((trend, index) => (
-            <div key={trend.title} className="trend-pill-item">
+            <button
+              key={trend.title}
+              type="button"
+              className="trend-pill-item"
+              onClick={() => onTrendClick?.(trend)}
+            >
               <span className="trend-rank">{index + 2}</span>
               <div>
                 <small>{trend.category}</small>
                 <strong>{trend.title}</strong>
               </div>
               <span className="trend-posts">{trend.posts}</span>
-            </div>
+            </button>
           ))}
         </div>
       </section>
 
-      {/* Sugestoes de perfis. Neste momento sao apenas visuais. */}
+      {/* Sugestoes de perfis carregadas do backend. */}
       <section className="panel follow-card">
         <div className="sidebar-card-head">
           <h3>Quem seguir</h3>
           <span>sugestões</span>
         </div>
         <div className="follow-list">
+          {suggestions.length === 0 ? (
+            <div className="sidebar-empty-state">
+              Ainda não há perfis reais suficientes para recomendar.
+            </div>
+          ) : null}
+
           {suggestions.map((person) => (
             <div key={person.handle} className="follow-item">
-              <div className="follow-avatar">
-                {person.initials}
-                <span
-                  className={`follow-status-dot is-${person.status}`}
-                  aria-hidden="true"
-                />
-              </div>
-              <div className="follow-meta">
-                <div className="follow-name-row">
-                  <strong>{person.name}</strong>
-                  <span className="follow-badge">{person.badge}</span>
+              <button
+                type="button"
+                className="follow-person-btn"
+                onClick={() => onSuggestionClick?.(person)}
+              >
+                <div className="follow-avatar">
+                  {person.initials}
+                  <span
+                    className={`follow-status-dot is-${person.status}`}
+                    aria-hidden="true"
+                  />
                 </div>
-                <span>{person.handle}</span>
-                <small>{person.context}</small>
-                <em>{person.mutual}</em>
-              </div>
-              <button type="button" className="follow-btn">
-                Seguir
+                <div className="follow-meta">
+                  <div className="follow-name-row">
+                    <strong>{person.name}</strong>
+                    <span className="follow-badge">{person.badge}</span>
+                  </div>
+                  <span>{person.handle}</span>
+                  <small>{person.context}</small>
+                  <em>{person.mutual}</em>
+                </div>
+              </button>
+              <button
+                type="button"
+                className={`follow-btn${person.following ? " is-following" : ""}`}
+                onClick={() => onToggleFollow?.(person)}
+                disabled={followActionUserId === person.id}
+                aria-pressed={person.following}
+              >
+                {followActionUserId === person.id
+                  ? "..."
+                  : person.following
+                    ? "Seguindo"
+                    : "Seguir"}
               </button>
             </div>
           ))}

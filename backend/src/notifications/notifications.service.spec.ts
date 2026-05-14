@@ -17,11 +17,13 @@ describe('NotificationsService', () => {
   let service: NotificationsService;
   let post: { findUnique: jest.Mock };
   let comment: { findUnique: jest.Mock };
+  let conversationParticipant: { findMany: jest.Mock };
   let notification: PrismaNotificationMock;
 
   beforeEach(() => {
     post = { findUnique: jest.fn() };
     comment = { findUnique: jest.fn() };
+    conversationParticipant = { findMany: jest.fn() };
     notification = {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -33,6 +35,7 @@ describe('NotificationsService', () => {
     service = new NotificationsService({
       post,
       comment,
+      conversationParticipant,
       notification,
       $transaction: jest.fn((operations: Promise<unknown>[]) =>
         Promise.all(operations),
@@ -127,6 +130,92 @@ describe('NotificationsService', () => {
     });
   });
 
+  it('creates one notification when someone likes another user post', async () => {
+    post.findUnique.mockResolvedValue({ authorId: 'post-author' });
+
+    await service.notifyPostLiked({
+      postId: 'post-1',
+      actorId: 'liker-user',
+    });
+
+    expect(notification.create).toHaveBeenCalledWith({
+      data: {
+        type: NOTIFICATION_TYPES.postLike,
+        recipientId: 'post-author',
+        actorId: 'liker-user',
+        postId: 'post-1',
+      },
+    });
+  });
+
+  it('does not notify the actor about their own post like', async () => {
+    post.findUnique.mockResolvedValue({ authorId: 'actor-user' });
+
+    await service.notifyPostLiked({
+      postId: 'post-1',
+      actorId: 'actor-user',
+    });
+
+    expect(notification.create).not.toHaveBeenCalled();
+  });
+
+  it('creates private message notifications for other participants', async () => {
+    conversationParticipant.findMany.mockResolvedValue([
+      { userId: 'recipient-1' },
+      { userId: 'recipient-2' },
+    ]);
+
+    await service.notifyPrivateMessageCreated({
+      conversationId: 'conversation-1',
+      messageId: 'message-1',
+      actorId: 'sender-user',
+    });
+
+    expect(conversationParticipant.findMany).toHaveBeenCalledWith({
+      where: {
+        conversationId: 'conversation-1',
+        userId: { not: 'sender-user' },
+      },
+      select: { userId: true },
+    });
+    expect(notification.create).toHaveBeenCalledTimes(2);
+    expect(notification.create).toHaveBeenNthCalledWith(1, {
+      data: {
+        type: NOTIFICATION_TYPES.privateMessage,
+        recipientId: 'recipient-1',
+        actorId: 'sender-user',
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+      },
+    });
+    expect(notification.create).toHaveBeenNthCalledWith(2, {
+      data: {
+        type: NOTIFICATION_TYPES.privateMessage,
+        recipientId: 'recipient-2',
+        actorId: 'sender-user',
+        conversationId: 'conversation-1',
+        messageId: 'message-1',
+      },
+    });
+  });
+
+  it('creates platform notices without an actor', async () => {
+    await service.notifyPlatformNotice({
+      recipientId: 'recipient-user',
+      title: 'Manutenção programada',
+      body: 'A plataforma será atualizada hoje.',
+    });
+
+    expect(notification.create).toHaveBeenCalledWith({
+      data: {
+        type: NOTIFICATION_TYPES.platformNotice,
+        recipientId: 'recipient-user',
+        title: 'Manutenção programada',
+        body: 'A plataforma será atualizada hoje.',
+      },
+    });
+  });
+
   it('marks all unread notifications for a user as read', async () => {
     notification.updateMany.mockResolvedValue({ count: 3 });
 
@@ -147,10 +236,14 @@ describe('NotificationsService', () => {
     notification.update.mockResolvedValue({
       id: 'notification-1',
       type: NOTIFICATION_TYPES.postComment,
+      title: null,
+      body: null,
       readAt,
       createdAt,
       postId: 'post-1',
       commentId: 'comment-1',
+      conversationId: null,
+      messageId: null,
       actor: {
         id: 'actor-user',
         email: 'actor@eureca.local',
@@ -173,10 +266,14 @@ describe('NotificationsService', () => {
     ).resolves.toEqual({
       id: 'notification-1',
       type: NOTIFICATION_TYPES.postComment,
+      title: null,
+      body: null,
       readAt,
       createdAt,
       postId: 'post-1',
       commentId: 'comment-1',
+      conversationId: null,
+      messageId: null,
       actor: {
         id: 'actor-user',
         email: 'actor@eureca.local',
@@ -192,6 +289,8 @@ describe('NotificationsService', () => {
         content: 'Comentario',
         parentCommentId: null,
       },
+      conversation: null,
+      message: null,
     });
     expect(notification.findFirst).toHaveBeenCalledWith({
       where: { id: 'notification-1', recipientId: 'recipient-user' },
